@@ -1,0 +1,8 @@
+[package]
+
+name = "gbEmu"
+version = "0.0.1"
+authors = ["Daniel Bokser <dan.bokser@gmail.com>"]
+
+#[dependencies.sdl2]
+#git = "https://github.com/AngryLawyer/rust-sdl2"
