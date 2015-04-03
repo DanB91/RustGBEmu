@@ -1,17 +1,15 @@
-#![feature(io)] 
-#![feature(env)] 
 #![allow(non_snake_case)]
 #![allow(dead_code)]
-#![feature(old_io)]
 
 use std::env;
-use std::old_io as io;
+use std::io;
 
 mod gb_memory;
 use gb_memory::*;
 
 mod gb_cpu;
 use gb_cpu::*;
+
 
 static USAGE: &'static str= "Usage: gbemu path_to_rom";
 
@@ -53,7 +51,15 @@ fn main() {
     mem.romData = romData;
 
     let mut stdin = io::stdin();
-    for _ in stdin.lock().lines() {
+    let mut line = String::new();
+    loop {
+
+        match stdin.read_line(&mut line) {
+            Ok(_) => {}
+            Err(_) => {
+                break;
+            }
+        }
         let instructionToExecute = readByteFromMemory(&mem, cpu.PC);
         println!("Current Insruction: {:X}", instructionToExecute);
         println!("Total Cycles: {}, Cycles just executed: {}", totalCycles, instructionCycles);
