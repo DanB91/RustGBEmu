@@ -159,10 +159,11 @@ mod tests {
     use super::*;
     use gb_memory::*;
     use super::Flag::*;
+    static MBC0_ROM : &'static str = "samples/mbc0.gb";
     fn tetrisMemoryState() -> MemoryState{
         let mut mem = MemoryState::new();
 
-         let romData = match openROM("/home/dan/Downloads/Tetris.gb") {
+         let romData = match openROM(MBC0_ROM) {
             Ok(data) => data,
             Err(err) => panic!("{}", err)
         };

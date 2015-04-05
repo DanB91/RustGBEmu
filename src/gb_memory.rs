@@ -104,10 +104,11 @@ pub fn openROM(fileName: &str) -> io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    static MBC0_ROM : &'static str = "samples/mbc0.gb";
 
 #[test]
     fn testReadAndWriteByte() {
-        let romData = match openROM("/home/dan/Downloads/Tetris.gb") {
+        let romData = match openROM(MBC0_ROM) {
             Ok(data) => data,
             Err(err) => panic!("{}", err)
         };
@@ -133,7 +134,7 @@ mod tests {
 
 #[test]
     fn testReadAndWriteWord() {
-        let romData = match openROM("/home/dan/Downloads/Tetris.gb") {
+        let romData = match openROM(MBC0_ROM) {
             Ok(data) => data,
             Err(err) => panic!("{}", err)
         };
@@ -147,7 +148,7 @@ mod tests {
         assert!(readWordFromMemory(&memory,0) == 0xFE31); //reading from bios 
 
         memory.inBios = false;
-        assert!(readWordFromMemory(&memory,0) == 0x8BC3); //reading from rom
+        assert!(readWordFromMemory(&memory,0) == 0x0CC3); //reading from rom
 
         memory.inBios = true;
         assert!(readWordFromMemory(&memory,0xC001) == 0); //reading from working ram
