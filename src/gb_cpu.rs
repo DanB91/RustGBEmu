@@ -292,4 +292,58 @@ mod tests {
         assert!(!isFlagSet(Neg, cpu.F));
 
     }
+
+    #[test]
+    fn decrement8() { //0x5
+
+        let mut cpu = testingCPU();
+        let mut mem = tetrisMemoryState();
+
+        //test half carry set
+        cpu.B = 0;
+
+        let (newPC, cyclesTaken) = executeInstruction(5, &mut cpu, &mut mem);
+
+        assert!(newPC == cpu.PC + 1);
+        assert!(cyclesTaken == 4);
+
+        assert!(cpu.B == 0xFF);
+        
+        assert!(isFlagSet(Half, cpu.F));
+        assert!(!isFlagSet(Zero, cpu.F));
+        assert!(isFlagSet(Neg, cpu.F));
+
+        //test zero set
+        
+        cpu = testingCPU();
+        mem = tetrisMemoryState();
+        cpu.B = 0x1;
+
+        let (newPC, cyclesTaken) = executeInstruction(5, &mut cpu, &mut mem);
+
+        assert!(newPC == cpu.PC + 1);
+        assert!(cyclesTaken == 4);
+
+        assert!(cpu.B == 0);
+        
+        assert!(!isFlagSet(Half, cpu.F));
+        assert!(isFlagSet(Zero, cpu.F));
+        assert!(isFlagSet(Neg, cpu.F));
+
+    }
+
+    #[test]
+    fn load8() {//0x6
+        let mut cpu = testingCPU();
+        let mut mem = tetrisMemoryState();
+        let oldPC = cpu.PC;
+
+        writeWordToMemory(&mut mem, 0xAA06, cpu.PC);
+
+        step(&mut cpu, &mut mem);
+
+        assert!(cpu.B == 0xAA);
+        assert!(cpu.instructionCycles == 8);
+        assert!(cpu.PC == oldPC + 2);
+    }
 }
