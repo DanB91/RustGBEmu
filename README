@@ -1,0 +1,12 @@
+The goal of this project is to create a Game Boy emulator in Rust.  Right now it only displays CPU debug information.
+It is compiled with the Rust 1.0 beta.
+
+To run:
+cargo run <path to Game Boy ROM>
+
+Currently, you can just step through each CPU instruction in the ROM by hitting enter. 
+Not all CPU opcodes are implemented yet.
+
+
+To run unit tests:
+cargo test

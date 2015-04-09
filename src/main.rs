@@ -32,6 +32,7 @@ fn getROMFileName() -> Result<String, &'static str> {
 
 fn main() {
 
+    //parse cmd args
     let fileName = match getROMFileName() {
         Ok(fileName) => fileName,
         Err(err) => panic!(err)
@@ -42,6 +43,7 @@ fn main() {
 
     let mut cpu = CPUState::new();
 
+    //load ROM
     let romData = match openROM(&fileName[..]) {
         Ok(data) => data,
         Err(err) => panic!("{}", err)
@@ -52,6 +54,8 @@ fn main() {
 
     let mut stdin = io::stdin();
     let mut line = String::new();
+    
+    //step one instruction every time you hit enter
     loop {
 
         match stdin.read_line(&mut line) {
