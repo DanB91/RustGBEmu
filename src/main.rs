@@ -35,7 +35,10 @@ fn main() {
     //parse cmd args
     let fileName = match getROMFileName() {
         Ok(fileName) => fileName,
-        Err(err) => panic!(err)
+        Err(err) => {
+            println!("{}", err);
+            return
+        }
     };
 
     let mut totalCycles = 0u32; //total cycles since game has been loaded
