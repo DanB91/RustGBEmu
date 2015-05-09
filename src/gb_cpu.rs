@@ -1,11 +1,19 @@
+/*
+ * All Z80 related functions go into this module
+ *
+ */
+
 use gb_memory::*;
 
 pub struct CPUState {
     pub PC: u16,
+    pub SP: u16,
     pub A: u8,
     pub B: u8,
     pub C: u8,
     pub F: u8,
+    pub H: u8,
+    pub L: u8,
     pub totalCycles: u32, //total cycles since game has been loaded
     pub instructionCycles: u32 //number of cycles in a given instruction
 
@@ -15,10 +23,13 @@ impl CPUState {
     pub fn new() -> CPUState {
         CPUState {
             PC: 0,
+            SP: 0,
             A: 0,
             B: 0,
             C: 0,
             F: 0,
+            H: 0,
+            L: 0,
             totalCycles: 0,
             instructionCycles: 0
         }
@@ -52,7 +63,32 @@ fn loadImm16(highDest: &mut u8, lowDest: &mut u8, PC: u16, mem: &MemoryState){
     *lowDest = readByteFromMemory(mem, PC+1);
 }
 
+/**
+  performs the INC X 8-bit instruction
 
+  Examples:
+  increment8(cpu, B) // increments the B register and sets appropiate flags
+*/
+
+macro_rules! increment8 {
+    ($cpu: ident, $reg: ident) => ({
+        $cpu.$reg = $cpu.$reg.wrapping_add(1);
+
+        match $cpu.$reg {
+            0 => setFlag(Zero, &mut $cpu.F),
+            _ => clearFlag(Zero, &mut $cpu.F) 
+        };
+
+        clearFlag(Neg, &mut $cpu.F);
+
+        match $cpu.$reg & 0xF {
+            0 => setFlag(Half, &mut $cpu.F),
+            _ => clearFlag(Half, &mut $cpu.F)
+        };
+        ($cpu.PC + 1, 4)
+    })
+
+}
 
 //returns a tuple of the form (new_PC_value, number_of_cycles_passed)
 
@@ -62,6 +98,16 @@ fn loadImm16(highDest: &mut u8, lowDest: &mut u8, PC: u16, mem: &MemoryState){
 pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryState) -> (u16, u32) {
 
     use self::Flag::*;
+
+
+    macro_rules! setFlag {
+        ($f:expr) => (setFlag($f, &mut cpu.F));
+    }
+
+    macro_rules! clearFlag {
+        ($f:expr) => (clearFlag($f, &mut cpu.F));
+    }
+
     match instruction {
         0x0 => { //NOP
             (cpu.PC + 1,4)
@@ -80,20 +126,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             (cpu.PC +1, 8)
         },
         0x4 => { //INC B
-            cpu.B = cpu.B.wrapping_add(1);
-
-            match cpu.B {
-                0 => setFlag(Zero, &mut cpu.F),
-                _ => clearFlag(Zero, &mut cpu.F) 
-            };
-
-            clearFlag(Neg, &mut cpu.F);
-
-            match cpu.B & 0xF {
-                0 => setFlag(Half, &mut cpu.F),
-                _ => clearFlag(Half, &mut cpu.F)
-            };
-            (cpu.PC + 1, 4)
+            increment8!(cpu,B)
         },
 
         0x5 => { //DEC B
@@ -120,13 +153,13 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
         0x7 => { //RLCA
 
-            clearFlag(Zero, &mut cpu.F);
-            clearFlag(Neg, &mut cpu.F);
-            clearFlag(Half, &mut cpu.F);
+            clearFlag!(Zero);
+            clearFlag!(Neg);
+            clearFlag!(Half);
 
             match cpu.A & 0x80 {
-                0 => clearFlag(Carry, &mut cpu.F),
-                _ => setFlag(Carry, &mut cpu.F)
+                0 => clearFlag!(Carry),
+                _ => setFlag!(Carry)
             }
 
             cpu.A = (cpu.A << 1) | (cpu.A >> 7);
@@ -134,11 +167,66 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             (cpu.PC + 1, 4)
         },
 
+        0x8 => { //LD (a16), SP
+            let addr = readWordFromMemory(mem, cpu.PC + 1);
+
+            writeWordToMemory(mem, cpu.SP, addr);
+
+            (cpu.PC + 3, 20)
+
+        },
+
+        0x9 => { //ADD HL, BC
+            //NOTE(DanB): Half and Carry flags may or may not be cleared
+
+            clearFlag!(Neg);
+            let BC = word(cpu.B, cpu.C) as u32;
+            let HL = word(cpu.H, cpu.L) as u32;
+
+            let result = HL.wrapping_add(BC);
+
+            if result & 0x10000 != 0 {
+                setFlag!(Carry);
+            }
+            else {
+                clearFlag!(Carry);
+            }
+
+            if (HL ^ BC ^ (result & 0xFFFF)) & 0x1000 != 0 {
+                setFlag!(Half);
+            }
+            else {
+                clearFlag!(Half);
+            }
+
+            cpu.H = hb(result as u16);
+            cpu.L = lb(result as u16);
+
+            (cpu.PC + 1, 8)
+        },
+
+        0xA => { //LD A, (BC)
+            cpu.A = readByteFromMemory(mem, word(cpu.B, cpu.C));
+            (cpu.PC + 1, 8)
+        },
+
+        0xB => { //DEC BC
+            let newVal = word(cpu.B,cpu.C).wrapping_sub(1);
+            cpu.B = hb(newVal); cpu.C = lb(newVal);
+            (cpu.PC +1, 8)
+
+        },
+
+        0xC => { //INC C
+            increment8!(cpu, C)
+        }
+
         _ => { //will act as a NOP for now
             (cpu.PC + 1, 4)
         },
     }
 }
+
 
 pub fn step(cpu: &mut CPUState, mem: &mut MemoryState) {
     let instructionToExecute = readByteFromMemory(&mem, cpu.PC);
@@ -153,197 +241,3 @@ pub fn step(cpu: &mut CPUState, mem: &mut MemoryState) {
     cpu.totalCycles += cyclesTaken;
 }
 
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use gb_memory::*;
-    use super::Flag::*;
-    static MBC0_ROM : &'static str = "samples/mbc0.gb";
-    fn tetrisMemoryState() -> MemoryState{
-        let mut mem = MemoryState::new();
-
-         let romData = match openROM(MBC0_ROM) {
-            Ok(data) => data,
-            Err(err) => panic!("{}", err)
-        };
-        mem.romData = romData;
-
-        mem
-    }
-
-    fn testingCPU() -> CPUState {
-        let mut cpu = CPUState::new();
-
-        cpu.PC = 0xC000; //set PC to beginning of working RAM
-
-        cpu
-    }
-
-    //NOTE(DanB): best for instructions that don't affect flags or require setup in memory
-    fn executeInstructionOnClearedState(instruction: u8) -> (CPUState, MemoryState) {
-        let mut cpu = CPUState::new();
-        let mut mem = tetrisMemoryState();
-
-        let(newPC, cyclesTaken) = executeInstruction(instruction, &mut cpu, &mut mem);
-        cpu.PC = newPC;
-        cpu.instructionCycles = cyclesTaken;
-        cpu.totalCycles += cyclesTaken;
-
-        (cpu,mem)
-    }
-
-    #[test]
-    fn nop() { //0x0 
-
-        let (cpu,_) = executeInstructionOnClearedState(0);
-
-        assert!(cpu.instructionCycles == 4);
-        assert!(cpu.PC == 1);
-
-    }
-
-    #[test]
-    fn loadImm16() { //0x1
-        let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
-
-        mem.workingRAM[1] = 0xBB; //write AABB to memory location 1
-        mem.workingRAM[2] = 0xAA;
-
-        let (newPC, cyclesTaken) = executeInstruction(1, &mut cpu, &mut mem);
-
-        assert!(newPC == cpu.PC + 3);
-        assert!(cyclesTaken == 12);
-
-        assert!(word(cpu.B,cpu.C) == 0xAABB);
-    }
-
-    #[test]
-    fn loadAIntoMemory() { //0x2
-        let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
-
-        cpu.A = 0xCC;
-        cpu.B = 0xC0;
-        cpu.C = 0x00;
-        //write 0xCC to beginning of working RAM (addr C000)
-        let (newPC, cyclesTaken) = executeInstruction(2, &mut cpu, &mut mem);
-
-        assert!(newPC == cpu.PC + 1);
-        assert!(cyclesTaken == 8);
-
-        assert!(mem.workingRAM[0] == 0xCC);
-
-    }
-
-    #[test]
-    fn increment16() { //0x3
-        let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
-
-        cpu.B = 0x0C;
-        cpu.C = 0xFF;
-
-        //increment BC
-        let (newPC, cyclesTaken) = executeInstruction(3, &mut cpu, &mut mem);
-
-        assert!(newPC == cpu.PC + 1);
-        assert!(cyclesTaken == 8);
-
-        assert!(word(cpu.B,cpu.C) == 0xD00);
-    }
-
-    #[test]
-    fn increment8() { //0x4
-
-        let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
-
-        //test half carry and zero set
-        cpu.B = 0xFF;
-
-        let (newPC, cyclesTaken) = executeInstruction(4, &mut cpu, &mut mem);
-
-        assert!(newPC == cpu.PC + 1);
-        assert!(cyclesTaken == 4);
-
-        assert!(cpu.B == 0);
-        
-        assert!(isFlagSet(Half, cpu.F));
-        assert!(isFlagSet(Zero, cpu.F));
-        assert!(!isFlagSet(Neg, cpu.F));
-
-        //test half carry and zero clear
-        
-        cpu = testingCPU();
-        mem = tetrisMemoryState();
-        cpu.B = 0x1;
-
-        let (newPC, cyclesTaken) = executeInstruction(4, &mut cpu, &mut mem);
-
-        assert!(newPC == cpu.PC + 1);
-        assert!(cyclesTaken == 4);
-
-        assert!(cpu.B == 2);
-        
-        assert!(!isFlagSet(Half, cpu.F));
-        assert!(!isFlagSet(Zero, cpu.F));
-        assert!(!isFlagSet(Neg, cpu.F));
-
-    }
-
-    #[test]
-    fn decrement8() { //0x5
-
-        let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
-
-        //test half carry set
-        cpu.B = 0;
-
-        let (newPC, cyclesTaken) = executeInstruction(5, &mut cpu, &mut mem);
-
-        assert!(newPC == cpu.PC + 1);
-        assert!(cyclesTaken == 4);
-
-        assert!(cpu.B == 0xFF);
-        
-        assert!(isFlagSet(Half, cpu.F));
-        assert!(!isFlagSet(Zero, cpu.F));
-        assert!(isFlagSet(Neg, cpu.F));
-
-        //test zero set
-        
-        cpu = testingCPU();
-        mem = tetrisMemoryState();
-        cpu.B = 0x1;
-
-        let (newPC, cyclesTaken) = executeInstruction(5, &mut cpu, &mut mem);
-
-        assert!(newPC == cpu.PC + 1);
-        assert!(cyclesTaken == 4);
-
-        assert!(cpu.B == 0);
-        
-        assert!(!isFlagSet(Half, cpu.F));
-        assert!(isFlagSet(Zero, cpu.F));
-        assert!(isFlagSet(Neg, cpu.F));
-
-    }
-
-    #[test]
-    fn load8() {//0x6
-        let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
-        let oldPC = cpu.PC;
-
-        writeWordToMemory(&mut mem, 0xAA06, cpu.PC);
-
-        step(&mut cpu, &mut mem);
-
-        assert!(cpu.B == 0xAA);
-        assert!(cpu.instructionCycles == 8);
-        assert!(cpu.PC == oldPC + 2);
-    }
-}
