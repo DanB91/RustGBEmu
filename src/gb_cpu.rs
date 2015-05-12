@@ -11,6 +11,8 @@ pub struct CPUState {
     pub A: u8,
     pub B: u8,
     pub C: u8,
+    pub D: u8,
+    pub E: u8,
     pub F: u8,
     pub H: u8,
     pub L: u8,
@@ -27,6 +29,8 @@ impl CPUState {
             A: 0,
             B: 0,
             C: 0,
+            D: 0,
+            E: 0,
             F: 0,
             H: 0,
             L: 0,
@@ -56,39 +60,15 @@ pub fn isFlagSet(flag: Flag, F: u8) -> bool {
     flag as u8 & F != 0
 }
 
-
 //return number of bytes to increment PC by
 fn loadImm16(highDest: &mut u8, lowDest: &mut u8, PC: u16, mem: &MemoryState){
     *highDest = readByteFromMemory(mem, PC+2);
     *lowDest = readByteFromMemory(mem, PC+1);
 }
 
-/**
-  performs the INC X 8-bit instruction
+//TODO(DanB): Should I move these macros into executeInstruction()?
 
-  Examples:
-  increment8(cpu, B) // increments the B register and sets appropiate flags
-*/
 
-macro_rules! increment8 {
-    ($cpu: ident, $reg: ident) => ({
-        $cpu.$reg = $cpu.$reg.wrapping_add(1);
-
-        match $cpu.$reg {
-            0 => setFlag(Zero, &mut $cpu.F),
-            _ => clearFlag(Zero, &mut $cpu.F) 
-        };
-
-        clearFlag(Neg, &mut $cpu.F);
-
-        match $cpu.$reg & 0xF {
-            0 => setFlag(Half, &mut $cpu.F),
-            _ => clearFlag(Half, &mut $cpu.F)
-        };
-        ($cpu.PC + 1, 4)
-    })
-
-}
 
 //returns a tuple of the form (new_PC_value, number_of_cycles_passed)
 
@@ -108,6 +88,164 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         ($f:expr) => (clearFlag($f, &mut cpu.F));
     }
 
+    macro_rules! isFlagSet {
+        ($f:expr) => (isFlagSet($f, cpu.F));
+    }
+
+    /*
+     * Used for instructions that add a register pair to the HL register pair
+     *
+     * Args:
+     *      srcHigh: high part of register pair to add to HL
+     *      srcLow: low part of register pair to add to HL
+     *
+     * Example:
+     *      addToHL!(B, C) //add BC to HL
+     *
+     */
+    macro_rules! addToHL {
+        ($srcHigh: ident, $srcLow: ident) => ({
+
+            //NOTE(DanB): Half and Carry flags may or may not be cleared
+
+            clearFlag!(Neg);
+            let src = word(cpu.$srcHigh, cpu.$srcLow) as u32;
+            let HL = word(cpu.H, cpu.L) as u32;
+
+            let result = HL.wrapping_add(src);
+
+            if result & 0x10000 != 0 {
+                setFlag!(Carry);
+            }
+            else {
+                clearFlag!(Carry);
+            }
+
+            if (HL ^ src ^ (result & 0xFFFF)) & 0x1000 != 0 {
+                setFlag!(Half);
+            }
+            else {
+                clearFlag!(Half);
+            }
+
+            cpu.H = hb(result as u16);
+            cpu.L = lb(result as u16);
+
+            (cpu.PC + 1, 8)
+        })
+    }
+
+    /*
+     * performs the INC XX, where XX is a 16-bit register pair
+     *
+     * Examples:
+     * increment16(cpu, B, C) // increments  the BC register pair
+     */
+    macro_rules! increment16 {
+
+        ($regHigh: ident, $regLow: ident) => ({
+
+            let newVal = word(cpu.$regHigh,cpu.$regLow).wrapping_add(1);
+            cpu.$regHigh = hb(newVal); cpu.$regLow = lb(newVal);
+            (cpu.PC +1, 8)
+        })
+    }
+
+    /*
+     * performs the INC XX, where XX is a 16-bit register pair
+     *
+     * Examples:
+     * increment16(cpu, B, C) // increments  the BC register pair
+     */
+    macro_rules! decrement16 {
+
+        ($regHigh: ident, $regLow: ident) => ({
+
+            let newVal = word(cpu.$regHigh,cpu.$regLow).wrapping_sub(1);
+            cpu.$regHigh = hb(newVal); cpu.$regLow = lb(newVal);
+            (cpu.PC +1, 8)
+        })
+    }
+
+    /*
+       performs the INC X 8-bit instruction
+
+       Examples:
+       increment8(cpu, B) // increments the B register and sets appropiate flags
+       */
+
+    macro_rules! increment8 {
+        ($reg: ident) => ({
+            cpu.$reg = cpu.$reg.wrapping_add(1);
+
+            match cpu.$reg {
+                0 => setFlag(Zero, &mut cpu.F),
+                _ => clearFlag(Zero, &mut cpu.F) 
+            };
+
+            clearFlag(Neg, &mut cpu.F);
+
+            match cpu.$reg & 0xF {
+                0 => setFlag(Half, &mut cpu.F),
+                _ => clearFlag(Half, &mut cpu.F)
+            };
+            (cpu.PC + 1, 4)
+        })
+
+    }
+
+    /*
+       performs the DEC X 8-bit instruction
+
+       Examples:
+       decrement8(cpu, B) // decrements the B register and sets appropiate flags
+       */
+    macro_rules! decrement8 {
+        ($reg: ident) => ({
+            cpu.$reg = cpu.$reg.wrapping_sub(1);
+
+            match cpu.$reg {
+                0 => setFlag(Zero, &mut cpu.F),
+                _ => clearFlag(Zero, &mut cpu.F) 
+            };
+
+            setFlag(Neg, &mut cpu.F);
+
+            match cpu.$reg & 0xF {
+                0xF => setFlag(Half, &mut cpu.F),
+                _ => clearFlag(Half, &mut cpu.F)
+            };
+            (cpu.PC + 1, 4)
+
+        })
+    }
+
+    /*
+     * Performs the JR series of instructions
+     *
+     * Args:
+     *      condition: whether to do the jump or not.
+     *
+     * Example:
+     *      jumpRelative(isFlagSet!(Carry))
+     *
+     */
+    macro_rules! jumpRelative {
+        ($condition: expr) => ({
+            //whether or not to do the actual jump
+            let offset = if $condition {
+                readByteFromMemory(&mem, cpu.PC + 1) as i8
+            }
+            else {
+                0
+            };
+
+            let cycles = if $condition {12} else {8};
+
+            ((cpu.PC as i16 + 2 + offset as i16) as u16, cycles)
+        })
+    }
+
     match instruction {
         0x0 => { //NOP
             (cpu.PC + 1,4)
@@ -121,29 +259,14 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             (cpu.PC + 1, 8)
         },
         0x3 => { //INC BC
-            let newVal = word(cpu.B,cpu.C).wrapping_add(1);
-            cpu.B = hb(newVal); cpu.C = lb(newVal);
-            (cpu.PC +1, 8)
+            increment16!(B, C)
         },
         0x4 => { //INC B
-            increment8!(cpu,B)
+            increment8!(B)
         },
 
         0x5 => { //DEC B
-            cpu.B = cpu.B.wrapping_sub(1);
-
-            match cpu.B {
-                0 => setFlag(Zero, &mut cpu.F),
-                _ => clearFlag(Zero, &mut cpu.F) 
-            };
-
-            setFlag(Neg, &mut cpu.F);
-
-            match cpu.B & 0xF {
-                0xF => setFlag(Half, &mut cpu.F),
-                _ => clearFlag(Half, &mut cpu.F)
-            };
-            (cpu.PC + 1, 4)
+            decrement8!(B)
         },
 
         0x6 => { //LD B, d8
@@ -177,32 +300,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
 
         0x9 => { //ADD HL, BC
-            //NOTE(DanB): Half and Carry flags may or may not be cleared
-
-            clearFlag!(Neg);
-            let BC = word(cpu.B, cpu.C) as u32;
-            let HL = word(cpu.H, cpu.L) as u32;
-
-            let result = HL.wrapping_add(BC);
-
-            if result & 0x10000 != 0 {
-                setFlag!(Carry);
-            }
-            else {
-                clearFlag!(Carry);
-            }
-
-            if (HL ^ BC ^ (result & 0xFFFF)) & 0x1000 != 0 {
-                setFlag!(Half);
-            }
-            else {
-                clearFlag!(Half);
-            }
-
-            cpu.H = hb(result as u16);
-            cpu.L = lb(result as u16);
-
-            (cpu.PC + 1, 8)
+            addToHL!(B,C)
         },
 
         0xA => { //LD A, (BC)
@@ -211,19 +309,167 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
 
         0xB => { //DEC BC
-            let newVal = word(cpu.B,cpu.C).wrapping_sub(1);
-            cpu.B = hb(newVal); cpu.C = lb(newVal);
-            (cpu.PC +1, 8)
-
+            decrement16!(B, C)
         },
 
         0xC => { //INC C
-            increment8!(cpu, C)
-        }
+            increment8!(C)
+        },
 
+        0xD => { //DEC C
+            decrement8!(C)
+        },
+        
+        0xE => { //LD C, d8
+            cpu.C = readByteFromMemory(&mem, cpu.PC + 1);
+            (cpu.PC + 2, 8)
+        },
+
+        0xF => { //RRCA
+            clearFlag!(Zero);
+            clearFlag!(Neg);
+            clearFlag!(Half);
+
+            match cpu.A & 0x1 {
+                0 => clearFlag!(Carry),
+                _ => setFlag!(Carry)
+            }
+
+            cpu.A = (cpu.A >> 1) | (cpu.A << 7);
+
+            (cpu.PC + 1, 4)
+        },
+
+        0x10 => { //STOP 0
+            //TODO: To be implemented
+            debug_assert!(readByteFromMemory(&mem, cpu.PC+1) == 0); //next byte should be 0
+            (cpu.PC + 2, 4)
+        },
+
+        0x11 => { //LD DE, d16
+            loadImm16(&mut cpu.D, &mut cpu.E, cpu.PC, &mem);
+            (cpu.PC + 3, 12) 
+        },
+
+        0x12 => { //LD (BC), A
+            writeByteToMemory(mem, cpu.A, word(cpu.D, cpu.E));
+            (cpu.PC + 1, 8)
+        },
+
+        0x13 => { //INC DE
+            increment16!(D, E)
+        },
+        
+        0x14 => { //INC D
+            increment8!(D)
+        },
+
+        0x15 => { //DEC D
+            decrement8!(D)
+        },
+
+        0x16 => { //LD D, d8
+            cpu.D = readByteFromMemory(&mem, cpu.PC + 1);
+            (cpu.PC + 2, 8)
+        },
+
+        0x17 => { //RLA
+            clearFlag!(Zero);
+            clearFlag!(Neg);
+            clearFlag!(Half);
+
+            let temp = if isFlagSet!(Carry) {
+                cpu.A << 1 | 1
+            }
+            else {
+                cpu.A << 1
+            };
+
+            match cpu.A & 0x80 {
+                0 => clearFlag!(Carry),
+                _ => setFlag!(Carry)
+            }
+
+            cpu.A = temp;
+
+            (cpu.PC + 1, 4)
+
+        },
+
+        0x18 => { //JR s8 
+            jumpRelative!(true)
+        },
+        
+        0x19 => { //ADD HL, DE
+            addToHL!(D,E)
+        },
+
+        0x1A => { //LD A, (DE)
+            cpu.A = readByteFromMemory(mem, word(cpu.D, cpu.E));
+            (cpu.PC + 1, 8)
+
+        },
+
+        0x1B => { //DEC DE
+            decrement16!(D, E)
+        },
+
+        0x1C => { //INC E
+            increment8!(E)
+        },
+
+        0x1D => { //DEC E
+            decrement8!(E)
+        },
+
+        0x1E => { //LD E, d8
+            cpu.E = readByteFromMemory(&mem, cpu.PC + 1);
+            (cpu.PC + 2, 8)
+        },
+
+        0x1F => { //RRA
+
+            clearFlag!(Zero);
+            clearFlag!(Neg);
+            clearFlag!(Half);
+
+            let temp = if isFlagSet!(Carry) {
+                cpu.A >> 1 | 0x80
+            }
+            else {
+                cpu.A >> 1
+            };
+
+            match cpu.A & 0x1 {
+                0 => clearFlag!(Carry),
+                _ => setFlag!(Carry)
+            }
+
+            cpu.A = temp;
+
+            (cpu.PC + 1, 4)
+
+        },
+
+        0x20 => { //JR NZ, s8
+            jumpRelative!(!isFlagSet!(Zero))
+        },
+
+        0x21 => { //LD HL, d16
+            loadImm16(&mut cpu.H, &mut cpu.L, cpu.PC, &mem);
+            (cpu.PC + 3, 12) 
+        },
+        
+        0x22 => { //LD (HL+), A
+            writeByteToMemory(mem, cpu.A, word(cpu.H, cpu.L));
+            increment16!(H,L);
+            (cpu.PC + 1, 8)
+        },
         _ => { //will act as a NOP for now
             (cpu.PC + 1, 4)
         },
+        
+
     }
 }
 
