@@ -207,7 +207,8 @@ fn increment16() { //0x3, 0x13
     }
 
     test!(3, testIncrement16!(B,C, 3);
-          0x13, testIncrement16!(D,E, 0x13));
+          0x13, testIncrement16!(D,E, 0x13);
+          0x23, testIncrement16!(H,L,0x23));
     
 }
 
@@ -261,7 +262,8 @@ fn increment8() { //0x4, 0xC, 0x14, 0x1C
     test!(0x4, testInc8!(B, 0x4);
           0xC, testInc8!(C, 0xC);
           0x14, testInc8!(D, 0x14);
-          0x1C, testInc8!(E, 0x1C)
+          0x1C, testInc8!(E, 0x1C);
+          0x24, testInc8!(H, 0x24)
           );
 
 }
@@ -312,7 +314,8 @@ fn decrement8() { //0x5, 0xD, 0x15
     test!(0x5, testDec8!(B, 0x5);
           0xD, testDec8!(C, 0xD);
           0x15, testDec8!(D, 0x15);
-          0x1D, testDec8!(E, 0x1D)
+          0x1D, testDec8!(E, 0x1D);
+          0x25, testDec8!(H, 0x25)
           );
 
 
@@ -340,7 +343,8 @@ fn load8() {//0x6, 0xE, 0x16, 0x1E
     test!(0x6, testLoad8!(B, 6);
           0xE, testLoad8!(C, 0xE);
           0x16, testLoad8!(D, 0x16);
-          0x1E, testLoad8!(E, 0x1E)
+          0x1E, testLoad8!(E, 0x1E);
+          0x26, testLoad8!(H, 0x26)
          );
 }
 
@@ -734,4 +738,8 @@ fn rotateRightThroughCarry() { //0x1F
 
     //test with C already set
     testRRA!(0x81, 0xC0, true, true);
+}
+
+fn decimalAdjust() {
+    //TODO: Cannot be implemented until 8-bit add and subtract are finished.
 }

@@ -62,8 +62,8 @@ pub fn isFlagSet(flag: Flag, F: u8) -> bool {
 
 //return number of bytes to increment PC by
 fn loadImm16(highDest: &mut u8, lowDest: &mut u8, PC: u16, mem: &MemoryState){
-    *highDest = readByteFromMemory(mem, PC+2);
-    *lowDest = readByteFromMemory(mem, PC+1);
+    *highDest = readByteFromMemory(mem, PC.wrapping_add(2));
+    *lowDest = readByteFromMemory(mem, PC.wrapping_add(1));
 }
 
 //TODO(DanB): Should I move these macros into executeInstruction()?
@@ -131,7 +131,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             cpu.H = hb(result as u16);
             cpu.L = lb(result as u16);
 
-            (cpu.PC + 1, 8)
+            (cpu.PC.wrapping_add(1), 8)
         })
     }
 
@@ -147,7 +147,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
             let newVal = word(cpu.$regHigh,cpu.$regLow).wrapping_add(1);
             cpu.$regHigh = hb(newVal); cpu.$regLow = lb(newVal);
-            (cpu.PC +1, 8)
+            (cpu.PC.wrapping_add(1), 8)
         })
     }
 
@@ -163,7 +163,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
             let newVal = word(cpu.$regHigh,cpu.$regLow).wrapping_sub(1);
             cpu.$regHigh = hb(newVal); cpu.$regLow = lb(newVal);
-            (cpu.PC +1, 8)
+            (cpu.PC.wrapping_add(1), 8)
         })
     }
 
@@ -189,7 +189,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
                 0 => setFlag(Half, &mut cpu.F),
                 _ => clearFlag(Half, &mut cpu.F)
             };
-            (cpu.PC + 1, 4)
+            (cpu.PC.wrapping_add(1), 4)
         })
 
     }
@@ -215,7 +215,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
                 0xF => setFlag(Half, &mut cpu.F),
                 _ => clearFlag(Half, &mut cpu.F)
             };
-            (cpu.PC + 1, 4)
+            (cpu.PC.wrapping_add(1), 4)
 
         })
     }
@@ -234,7 +234,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         ($condition: expr) => ({
             //whether or not to do the actual jump
             let offset = if $condition {
-                readByteFromMemory(&mem, cpu.PC + 1) as i8
+                readByteFromMemory(&mem, cpu.PC.wrapping_add(1)) as i8
             }
             else {
                 0
@@ -242,21 +242,21 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
             let cycles = if $condition {12} else {8};
 
-            ((cpu.PC as i16 + 2 + offset as i16) as u16, cycles)
+            (((cpu.PC as i16).wrapping_add(2).wrapping_add(offset as i16)) as u16, cycles)
         })
     }
 
     match instruction {
         0x0 => { //NOP
-            (cpu.PC + 1,4)
+            (cpu.PC.wrapping_add(1),4)
         }, 
         0x1 => { //LD BC, NN
             loadImm16(&mut cpu.B, &mut cpu.C, cpu.PC, &mem);
-            (cpu.PC + 3, 12)
+            (cpu.PC.wrapping_add(3), 12)
         },
         0x2 => { //LD (BC), A
             writeByteToMemory(mem, cpu.A, word(cpu.B, cpu.C));
-            (cpu.PC + 1, 8)
+            (cpu.PC.wrapping_add(1), 8)
         },
         0x3 => { //INC BC
             increment16!(B, C)
@@ -270,8 +270,8 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
 
         0x6 => { //LD B, d8
-            cpu.B = readByteFromMemory(&mem, cpu.PC + 1);
-            (cpu.PC + 2, 8)
+            cpu.B = readByteFromMemory(&mem, cpu.PC.wrapping_add(1));
+            (cpu.PC.wrapping_add(2), 8)
         },
 
         0x7 => { //RLCA
@@ -287,15 +287,15 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
             cpu.A = (cpu.A << 1) | (cpu.A >> 7);
 
-            (cpu.PC + 1, 4)
+            (cpu.PC.wrapping_add(1), 4)
         },
 
         0x8 => { //LD (a16), SP
-            let addr = readWordFromMemory(mem, cpu.PC + 1);
+            let addr = readWordFromMemory(mem, cpu.PC.wrapping_add(1));
 
             writeWordToMemory(mem, cpu.SP, addr);
 
-            (cpu.PC + 3, 20)
+            (cpu.PC.wrapping_add(3), 20)
 
         },
 
@@ -305,7 +305,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
         0xA => { //LD A, (BC)
             cpu.A = readByteFromMemory(mem, word(cpu.B, cpu.C));
-            (cpu.PC + 1, 8)
+            (cpu.PC.wrapping_add(1), 8)
         },
 
         0xB => { //DEC BC
@@ -321,8 +321,8 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
         
         0xE => { //LD C, d8
-            cpu.C = readByteFromMemory(&mem, cpu.PC + 1);
-            (cpu.PC + 2, 8)
+            cpu.C = readByteFromMemory(&mem, cpu.PC.wrapping_add(1));
+            (cpu.PC.wrapping_add(2), 8)
         },
 
         0xF => { //RRCA
@@ -337,23 +337,23 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
             cpu.A = (cpu.A >> 1) | (cpu.A << 7);
 
-            (cpu.PC + 1, 4)
+            (cpu.PC.wrapping_add(1), 4)
         },
 
         0x10 => { //STOP 0
             //TODO: To be implemented
-            debug_assert!(readByteFromMemory(&mem, cpu.PC+1) == 0); //next byte should be 0
-            (cpu.PC + 2, 4)
+            debug_assert!(readByteFromMemory(&mem, cpu.PC.wrapping_add(1)) == 0); //next byte should be 0
+            (cpu.PC.wrapping_add(2), 4)
         },
 
         0x11 => { //LD DE, d16
             loadImm16(&mut cpu.D, &mut cpu.E, cpu.PC, &mem);
-            (cpu.PC + 3, 12) 
+            (cpu.PC.wrapping_add(3), 12) 
         },
 
         0x12 => { //LD (BC), A
             writeByteToMemory(mem, cpu.A, word(cpu.D, cpu.E));
-            (cpu.PC + 1, 8)
+            (cpu.PC.wrapping_add(1), 8)
         },
 
         0x13 => { //INC DE
@@ -369,8 +369,8 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
 
         0x16 => { //LD D, d8
-            cpu.D = readByteFromMemory(&mem, cpu.PC + 1);
-            (cpu.PC + 2, 8)
+            cpu.D = readByteFromMemory(&mem, cpu.PC.wrapping_add(1));
+            (cpu.PC.wrapping_add(2), 8)
         },
 
         0x17 => { //RLA
@@ -392,7 +392,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
             cpu.A = temp;
 
-            (cpu.PC + 1, 4)
+            (cpu.PC.wrapping_add(1), 4)
 
         },
 
@@ -406,7 +406,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
         0x1A => { //LD A, (DE)
             cpu.A = readByteFromMemory(mem, word(cpu.D, cpu.E));
-            (cpu.PC + 1, 8)
+            (cpu.PC.wrapping_add(1), 8)
 
         },
 
@@ -423,8 +423,8 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
 
         0x1E => { //LD E, d8
-            cpu.E = readByteFromMemory(&mem, cpu.PC + 1);
-            (cpu.PC + 2, 8)
+            cpu.E = readByteFromMemory(&mem, cpu.PC.wrapping_add(1));
+            (cpu.PC.wrapping_add(2), 8)
         },
 
         0x1F => { //RRA
@@ -447,7 +447,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
             cpu.A = temp;
 
-            (cpu.PC + 1, 4)
+            (cpu.PC.wrapping_add(1), 4)
 
         },
 
@@ -457,16 +457,79 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
         0x21 => { //LD HL, d16
             loadImm16(&mut cpu.H, &mut cpu.L, cpu.PC, &mem);
-            (cpu.PC + 3, 12) 
+            (cpu.PC.wrapping_add(3), 12) 
         },
         
         0x22 => { //LD (HL+), A
             writeByteToMemory(mem, cpu.A, word(cpu.H, cpu.L));
             increment16!(H,L);
-            (cpu.PC + 1, 8)
+            (cpu.PC.wrapping_add(1), 8)
+        },
+        
+        0x23 => { //INC HL
+            increment16!(H,L)
+        },
+
+        0x24 => { //INC H
+            increment8!(H)
+        },
+
+        0x25 => { //DEC H
+            decrement8!(H)
+        },
+        
+        0x26 => { //LD H, d8
+            cpu.H = readByteFromMemory(&mem, cpu.PC.wrapping_add(1));
+            (cpu.PC.wrapping_add(2), 8)
+        },
+
+        0x27 => { //DAA
+
+            let mut result = cpu.A as u16;
+
+            if !isFlagSet!(Neg) { //if addition was used
+                
+                if isFlagSet!(Half) || result & 0xF > 0x9 {
+                    result = result.wrapping_add(0x6);
+                }
+
+                if isFlagSet!(Carry) || result & 0xF0 > 0x90 {
+                    result = result.wrapping_add(0x60);
+                }
+
+            }
+            else { //subtraction used
+
+                if isFlagSet!(Half) {
+                    result = result.wrapping_sub(6) & 0xFF;
+                }
+
+                if isFlagSet!(Carry) {
+                    result = result.wrapping_sub(0x60);
+                }
+
+            }
+
+            if result & 100 > 0 {
+                setFlag!(Carry);
+            }
+
+            clearFlag!(Half);
+
+            if result & 0xFF == 0 {
+                setFlag!(Zero);
+            }
+            else {
+                clearFlag!(Zero);
+            }
+
+            cpu.A = result as u8;
+
+            (cpu.PC.wrapping_add(1), 4)
+
         },
         _ => { //will act as a NOP for now
-            (cpu.PC + 1, 4)
+            (cpu.PC.wrapping_add(1), 4)
         },
         
 
