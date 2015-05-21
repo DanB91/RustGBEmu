@@ -40,6 +40,7 @@ impl CPUState {
     }
 }
 
+#[derive(Copy, Clone)]
 pub enum Flag {
     Zero = 0x80,
     Neg = 0x40,
@@ -155,7 +156,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
      * performs the INC XX, where XX is a 16-bit register pair
      *
      * Examples:
-     * increment16(cpu, B, C) // increments  the BC register pair
+     * increment16(B, C) // increments  the BC register pair
      */
     macro_rules! decrement16 {
 
@@ -528,6 +529,112 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             (cpu.PC.wrapping_add(1), 4)
 
         },
+
+        0x28 => { //JR Z, s8
+            jumpRelative!(isFlagSet!(Zero))
+
+        },
+        0x29 => { //ADD HL, HL
+            addToHL!(H,L)
+        },
+        
+        0x2A => { //LD A, (HL+)
+            cpu.A = readByteFromMemory(mem, word(cpu.H, cpu.L));
+            increment16!(H,L);
+            (cpu.PC.wrapping_add(1), 8)
+
+        },
+
+        0x2B => { //DEC HL
+            decrement16!(H,L)
+        },
+
+        0x2C => { //INC L
+            increment8!(L)
+        },
+
+        0x2D => { //DEC L
+            decrement8!(L)
+        },
+        
+        0x2E => { //LD L, d8
+            cpu.L = readByteFromMemory(&mem, cpu.PC.wrapping_add(1));
+            (cpu.PC.wrapping_add(2), 8)
+        },
+
+        0x2F => { //CPL
+            cpu.A = !cpu.A;
+            setFlag!(Neg);
+            setFlag!(Half);
+            (cpu.PC.wrapping_add(1), 4)
+
+        },
+        
+        0x30 => { //JR NC, s8
+            jumpRelative!(!isFlagSet!(Carry))
+
+        },
+
+        0x31 => { //LD SP, d16
+            cpu.SP = readWordFromMemory(&mem, cpu.PC.wrapping_add(1));
+            (cpu.PC.wrapping_add(3), 12)
+        },
+        
+        0x32 => { //LD (HL-), A
+            writeByteToMemory(mem, cpu.A, word(cpu.H, cpu.L));
+            decrement16!(H,L);
+            (cpu.PC.wrapping_add(1), 8)
+        },
+
+        0x33 => { //INC SP
+            cpu.SP = cpu.SP.wrapping_add(1);
+            (cpu.PC.wrapping_add(1), 8)
+        },
+
+        0x34 => { //INC (HL)
+
+            let val = readByteFromMemory(&mem, word(cpu.H, cpu.L)).wrapping_add(1); //incremented value
+
+            match val {
+                0 => setFlag(Zero, &mut cpu.F),
+                _ => clearFlag(Zero, &mut cpu.F) 
+            };
+
+            clearFlag(Neg, &mut cpu.F);
+
+            match val & 0xF {
+                0 => setFlag(Half, &mut cpu.F),
+                _ => clearFlag(Half, &mut cpu.F)
+            };
+
+            writeByteToMemory(mem, val, word(cpu.H, cpu.L));
+
+            (cpu.PC.wrapping_add(1), 12)
+
+        },
+        
+        0x35 => { //DEC (HL)
+
+            let val = readByteFromMemory(&mem, word(cpu.H, cpu.L)).wrapping_sub(1); //decremented value
+
+            match val {
+                0 => setFlag(Zero, &mut cpu.F),
+                _ => clearFlag(Zero, &mut cpu.F) 
+            };
+
+            setFlag(Neg, &mut cpu.F);
+
+            match val & 0xF {
+                0xF => setFlag(Half, &mut cpu.F),
+                _ => clearFlag(Half, &mut cpu.F)
+            };
+
+            writeByteToMemory(mem, val, word(cpu.H, cpu.L));
+
+            (cpu.PC.wrapping_add(1), 12)
+
+        }
+
         _ => { //will act as a NOP for now
             (cpu.PC.wrapping_add(1), 4)
         },
