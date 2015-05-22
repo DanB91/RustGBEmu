@@ -107,7 +107,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
     macro_rules! addToHL {
         ($srcHigh: ident, $srcLow: ident) => ({
 
-            //NOTE(DanB): Half and Carry flags may or may not be cleared
+            //NOTE(DanB): Don't know if Half and Carry flags should or should not be cleared
 
             clearFlag!(Neg);
             let src = word(cpu.$srcHigh, cpu.$srcLow) as u32;
@@ -133,6 +133,36 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             cpu.L = lb(result as u16);
 
             (cpu.PC.wrapping_add(1), 8)
+        });
+
+        ($src16: ident) => ({
+            //NOTE(DanB): Don't know if Half and Carry flags should or should not be cleared
+
+            clearFlag!(Neg);
+            let src = cpu.$src16 as u32;
+            let HL = word(cpu.H, cpu.L) as u32;
+
+            let result = HL.wrapping_add(src);
+
+            if result & 0x10000 != 0 {
+                setFlag!(Carry);
+            }
+            else {
+                clearFlag!(Carry);
+            }
+
+            if (HL ^ src ^ (result & 0xFFFF)) & 0x1000 != 0 {
+                setFlag!(Half);
+            }
+            else {
+                clearFlag!(Half);
+            }
+
+            cpu.H = hb(result as u16);
+            cpu.L = lb(result as u16);
+
+            (cpu.PC.wrapping_add(1), 8)
+
         })
     }
 
@@ -593,7 +623,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
         0x34 => { //INC (HL)
 
-            let val = readByteFromMemory(&mem, word(cpu.H, cpu.L)).wrapping_add(1); //incremented value
+            let val = readByteFromMemory(mem, word(cpu.H, cpu.L)).wrapping_add(1); //incremented value
 
             match val {
                 0 => setFlag(Zero, &mut cpu.F),
@@ -633,8 +663,72 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
             (cpu.PC.wrapping_add(1), 12)
 
-        }
+        },
 
+        0x36 => { //LD (HL), d8
+
+            let val = readByteFromMemory(mem, cpu.PC.wrapping_add(1)); //value from memory
+            writeByteToMemory(mem, val, word(cpu.H, cpu.L));
+
+            (cpu.PC.wrapping_add(2), 12)
+
+        },
+
+        0x37 => { //SCF
+            setFlag!(Carry);
+            clearFlag!(Half);
+            clearFlag!(Neg);
+
+            (cpu.PC.wrapping_add(1), 4)
+
+        },
+        
+        0x38 => { //JR C, r8
+            jumpRelative!(isFlagSet!(Carry))
+        },
+
+        0x39 => { //ADD HL, SP
+            addToHL!(SP)
+        },
+        
+        0x3A => { //LD A, (HL-)
+            cpu.A = readByteFromMemory(mem, word(cpu.H, cpu.L));
+            decrement16!(H,L);
+            (cpu.PC.wrapping_add(1), 8)
+
+        },
+        
+        0x3B => { //DEC SP
+            cpu.SP = cpu.SP.wrapping_sub(1);
+            (cpu.PC.wrapping_add(1), 8)
+        },
+
+        0x3C => { //INC A
+            increment8!(A)
+        },
+        
+        0x3D => { //DEC A
+            decrement8!(A)
+        },
+        
+        0x3E => { //LD A, d8
+            cpu.A = readByteFromMemory(mem, cpu.PC.wrapping_add(1));
+            (cpu.PC.wrapping_add(2), 8)
+        },
+        
+        0x3F => { //CCF
+            clearFlag!(Half);
+            clearFlag!(Neg);
+
+            if isFlagSet!(Carry) {
+                clearFlag!(Carry);
+            } 
+            else {
+                setFlag!(Carry);
+            }
+
+            (cpu.PC.wrapping_add(1), 4)
+        },
         _ => { //will act as a NOP for now
             (cpu.PC.wrapping_add(1), 4)
         },

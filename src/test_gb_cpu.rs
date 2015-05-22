@@ -265,7 +265,8 @@ fn increment8() { //0x4, 0xC, 0x14, 0x1C
           0x14, testInc8!(D, 0x14);
           0x1C, testInc8!(E, 0x1C);
           0x24, testInc8!(H, 0x24);
-          0x2C, testInc8!(L, 0x2C)
+          0x2C, testInc8!(L, 0x2C);
+          0x3C, testInc8!(A, 0x3C)
           );
 
 }
@@ -318,7 +319,8 @@ fn decrement8() { //0x5, 0xD, 0x15
           0x15, testDec8!(D, 0x15);
           0x1D, testDec8!(E, 0x1D);
           0x25, testDec8!(H, 0x25);
-          0x2D, testDec8!(L, 0x2D)
+          0x2D, testDec8!(L, 0x2D);
+          0x3D, testDec8!(A, 0x3D)
           );
 
 
@@ -348,7 +350,8 @@ fn load8() {//0x6, 0xE, 0x16, 0x1E
           0x16, testLoad8!(D, 0x16);
           0x1E, testLoad8!(E, 0x1E);
           0x26, testLoad8!(H, 0x26);
-          0x2E, testLoad8!(L, 0x2E)
+          0x2E, testLoad8!(L, 0x2E);
+          0x3E, testLoad8!(A, 0x3E)
          );
 }
 
@@ -499,7 +502,7 @@ fn addHLToHL() { //0x29
     cpu.H = 0xFF;
     cpu.L = 0xFF;
 
-    //FFFF + 2 = 1
+    //FFFF * 2 = 0x1FFFE
     let (newPC, cyclesTaken) = executeInstruction(0x29, &mut cpu, &mut mem);
 
     assert!(cyclesTaken == 8);
@@ -514,6 +517,48 @@ fn addHLToHL() { //0x29
     
 
 }
+
+#[test]
+fn addSPToHL() { //0x39
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+    //HL has 0x1077
+    cpu.H = 0x10;
+    cpu.L = 0x77;
+
+    cpu.SP = 0x1122;
+
+    //0x1077 + 0x1122 = 2199
+    let (newPC, cyclesTaken) = executeInstruction(0x39, &mut cpu, &mut mem);
+
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 1);
+    assert!(word(cpu.H, cpu.L) == 0x2199);
+
+    //no flags set
+    assert!(cpu.F == 0);
+
+    //HL has 0xFFFF
+    cpu.H = 0xFF;
+    cpu.L = 0xFF;
+
+    cpu.SP = 0x2;
+
+    //FFFF + 2 = 1
+    let (newPC, cyclesTaken) = executeInstruction(0x39, &mut cpu, &mut mem);
+
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 1);
+    assert!(word(cpu.H, cpu.L) == 1);
+
+    //H, C set
+    assert!(isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+
+}
+
 #[test]
 fn loadFromMem8Bit() { //0xA
 
@@ -777,6 +822,7 @@ fn jumpRelativeWithCondition() { //0x20
     testJRC(Zero, false, 0x20);
     testJRC(Zero, true, 0x28);
     testJRC(Carry, false, 0x30);
+    testJRC(Carry, true, 0x38);
 
 }
 
@@ -893,6 +939,23 @@ fn incrementSP() { //0x33
 }
 
 #[test]
+fn decrementSP() { //0x3B
+
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+    cpu.SP = 0xD000;
+
+    //decrement SP
+    let (newPC, cyclesTaken) = executeInstruction(0x3B, &mut cpu, &mut mem);
+
+    assert!(newPC == cpu.PC + 1);
+    assert!(cyclesTaken == 8);
+
+    assert!(cpu.SP == 0xCFFF);
+}
+
+#[test]
 fn incrementValAtHL() { //0x34
     let mut cpu = testingCPU();
     let mut mem = tetrisMemoryState();
@@ -933,3 +996,122 @@ fn incrementValAtHL() { //0x34
 
 }
 
+#[test]
+fn decrementValAtHL() { //0x35
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+    //decrement value at 0xCCDD
+    cpu.H = 0xCC;
+    cpu.L = 0xDD;
+
+    //test half carry
+    writeByteToMemory(&mut mem, 0, 0xCCDD);
+
+    let (newPC, cyclesTaken) = executeInstruction(0x35, &mut cpu, &mut mem);
+
+    assert!(newPC == cpu.PC + 1);
+    assert!(cyclesTaken == 12);
+
+    assert!(readByteFromMemory(&mem, 0xCCDD) == 0xFF);
+
+    assert!(isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+
+    //test zero set
+
+    writeByteToMemory(&mut mem, 0x1, 0xCCDD);
+
+    let (newPC, cyclesTaken) = executeInstruction(0x35, &mut cpu, &mut mem);
+
+    assert!(newPC == cpu.PC + 1);
+    assert!(cyclesTaken == 12);
+
+    assert!(readByteFromMemory(&mem, 0xCCDD) == 0);
+
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+
+    //test nothing set
+
+    writeByteToMemory(&mut mem, 0xFF, 0xCCDD);
+
+    let (newPC, cyclesTaken) = executeInstruction(0x35, &mut cpu, &mut mem);
+
+    assert!(newPC == cpu.PC + 1);
+    assert!(cyclesTaken == 12);
+
+    assert!(readByteFromMemory(&mem, 0xCCDD) == 0xFE);
+
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+
+}
+
+
+#[test]
+fn loadImm8ToMemPointedAtHL() { //0x36
+
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+    //decrement value at 0xCCDD
+    cpu.H = 0xCC;
+    cpu.L = 0xDD;
+
+    //test half carry
+    writeByteToMemory(&mut mem, 0xAA, cpu.PC + 1);
+
+    let (newPC, cyclesTaken) = executeInstruction(0x36, &mut cpu, &mut mem);
+
+    assert!(newPC == cpu.PC + 2);
+    assert!(cyclesTaken == 12);
+
+    assert!(readByteFromMemory(&mem, 0xCCDD) == 0xAA);
+}
+
+#[test]
+fn setCarry() { //0x37
+    let (cpu, _) = executeInstructionOnClearedState(0x37);
+
+    assert!(cpu.PC == 1);
+    assert!(cpu.instructionCycles == 4);
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+}
+
+#[test]
+fn complementCarry() { //0x3F
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+    cpu.F = 0xF0;  //set all flags
+
+    let (newPC, cyclesTaken) = executeInstruction(0x3F, &mut cpu, &mut mem);
+
+    assert!(newPC == cpu.PC + 1);
+    assert!(cyclesTaken == 4);
+    
+    //everything but Zero flag should be off since Zero is not affected
+    assert!(isFlagSet(Zero, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+    assert!(!isFlagSet(Half, cpu.F));
+
+    cpu.F = 0x0;  //clear all flags
+
+    let (newPC, cyclesTaken) = executeInstruction(0x3F, &mut cpu, &mut mem);
+
+    assert!(newPC == cpu.PC + 1);
+    assert!(cyclesTaken == 4);
+
+    //everything but Carry flag should be off 
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+    assert!(!isFlagSet(Half, cpu.F));
+}
