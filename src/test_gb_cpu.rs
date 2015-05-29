@@ -1115,3 +1115,221 @@ fn complementCarry() { //0x3F
     assert!(!isFlagSet(Neg, cpu.F));
     assert!(!isFlagSet(Half, cpu.F));
 }
+
+#[test]
+fn load8BitReg() { //0x40 - 0x7F
+    
+    //used for register to register loading
+    macro_rules! load8BitRegFromReg {
+        ($dest: ident, $src: ident, $instr: expr) => ({
+            
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+            cpu.$src = 0xAA;
+
+            let (newPC, cyclesTaken) = executeInstruction($instr, &mut cpu, &mut mem);
+
+            assert!(cpu.$dest == 0xAA);
+            assert!(newPC == cpu.PC + 1);
+            assert!(cyclesTaken == 4);
+        });
+
+
+    }
+
+    //used for (HL) to register loading
+    macro_rules! load8BitRegFromMem {
+
+        ($dest: ident, $instr: expr) => ({
+            
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+            cpu.H = 0xCC;
+            cpu.L = 0xDD;
+
+            writeByteToMemory(&mut mem, 0xAA, 0xCCDD);
+
+            let (newPC, cyclesTaken) = executeInstruction($instr, &mut cpu, &mut mem);
+
+            assert!(cpu.$dest == 0xAA);
+            assert!(newPC == cpu.PC + 1);
+            assert!(cyclesTaken == 8);
+        });
+    }
+
+
+    //used for (HL) to register loading
+    macro_rules! load8BitMemFromReg {
+
+        ($src: ident, $instr: expr) => ({
+            
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+            cpu.H = 0xCC;
+            cpu.L = 0xCC;
+
+            cpu.$src = 0xCC;
+
+            let (newPC, cyclesTaken) = executeInstruction($instr, &mut cpu, &mut mem);
+
+            assert!(readByteFromMemory(&mut mem, 0xCCCC) == 0xCC);
+            assert!(newPC == cpu.PC + 1);
+            assert!(cyclesTaken == 8);
+        });
+    }
+
+    load8BitRegFromReg!(B, B, 0x40);
+    load8BitRegFromReg!(B, C, 0x41);
+    load8BitRegFromReg!(B, D, 0x42);
+    load8BitRegFromReg!(B, E, 0x43);
+    load8BitRegFromReg!(B, H, 0x44);
+    load8BitRegFromReg!(B, L, 0x45);
+    load8BitRegFromMem!(B, 0x46);
+    load8BitRegFromReg!(B, A, 0x47);
+    
+    load8BitRegFromReg!(C, B, 0x48);
+    load8BitRegFromReg!(C, C, 0x49);
+    load8BitRegFromReg!(C, D, 0x4A);
+    load8BitRegFromReg!(C, E, 0x4B);
+    load8BitRegFromReg!(C, H, 0x4C);
+    load8BitRegFromReg!(C, L, 0x4D);
+    load8BitRegFromMem!(C, 0x4E);
+    load8BitRegFromReg!(C, A, 0x4F);
+
+    load8BitRegFromReg!(D, B, 0x50);
+    load8BitRegFromReg!(D, C, 0x51);
+    load8BitRegFromReg!(D, D, 0x52);
+    load8BitRegFromReg!(D, E, 0x53);
+    load8BitRegFromReg!(D, H, 0x54);
+    load8BitRegFromReg!(D, L, 0x55);
+    load8BitRegFromMem!(D, 0x56);
+    load8BitRegFromReg!(D, A, 0x57);
+    
+    load8BitRegFromReg!(E, B, 0x58);
+    load8BitRegFromReg!(E, C, 0x59);
+    load8BitRegFromReg!(E, D, 0x5A);
+    load8BitRegFromReg!(E, E, 0x5B);
+    load8BitRegFromReg!(E, H, 0x5C);
+    load8BitRegFromReg!(E, L, 0x5D);
+    load8BitRegFromMem!(E, 0x5E);
+    load8BitRegFromReg!(E, A, 0x5F);
+
+    load8BitRegFromReg!(H, B, 0x60);
+    load8BitRegFromReg!(H, C, 0x61);
+    load8BitRegFromReg!(H, D, 0x62);
+    load8BitRegFromReg!(H, E, 0x63);
+    load8BitRegFromReg!(H, H, 0x64);
+    load8BitRegFromReg!(H, L, 0x65);
+    load8BitRegFromMem!(H, 0x66);
+    load8BitRegFromReg!(H, A, 0x67);
+    
+    load8BitRegFromReg!(L, B, 0x68);
+    load8BitRegFromReg!(L, C, 0x69);
+    load8BitRegFromReg!(L, D, 0x6A);
+    load8BitRegFromReg!(L, E, 0x6B);
+    load8BitRegFromReg!(L, H, 0x6C);
+    load8BitRegFromReg!(L, L, 0x6D);
+    load8BitRegFromMem!(L, 0x6E);
+    load8BitRegFromReg!(L, A, 0x6F);
+
+    load8BitMemFromReg!(B, 0x70);
+    load8BitMemFromReg!(C, 0x71);
+    load8BitMemFromReg!(D, 0x72);
+    load8BitMemFromReg!(E, 0x73);
+    load8BitMemFromReg!(H, 0x74);
+    load8BitMemFromReg!(L, 0x75);
+    load8BitMemFromReg!(A, 0x77);
+
+    load8BitRegFromReg!(A, B, 0x78);
+    load8BitRegFromReg!(A, C, 0x79);
+    load8BitRegFromReg!(A, D, 0x7A);
+    load8BitRegFromReg!(A, E, 0x7B);
+    load8BitRegFromReg!(A, H, 0x7C);
+    load8BitRegFromReg!(A, L, 0x7D);
+    load8BitRegFromMem!(A, 0x7E);
+    load8BitRegFromReg!(A, A, 0x7F);
+}
+
+#[test]
+fn halt() { //0x76
+    //TODO(DanB): to be tested properly implemeted....
+    
+
+    let (cpu, _) = executeInstructionOnClearedState(0x76);
+
+    assert!(cpu.PC == 1);
+    assert!(cpu.instructionCycles == 4);
+}
+
+#[test]
+fn add8Bit() { //0x80-0x8F
+
+    macro_rules! testAdd8 {
+        ($srcReg: ident, $inst: expr) => ({
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+            //HL has 0x55AA
+            cpu.A = 0xAA;
+
+            cpu.$srcReg = 0x11;
+
+            //AA + 11 = BB
+            let (newPC, cyclesTaken) = executeInstruction($inst, &mut cpu, &mut mem);
+
+            assert!(cyclesTaken == 4);
+            assert!(newPC == cpu.PC + 1);
+            assert!(cpu.A == 0xBB);
+            assert!(cpu.$srcReg == 0x11);
+
+            //no flags set
+            assert!(cpu.F == 0);
+
+
+            cpu.A = 0xAE;
+            
+            cpu.$srcReg = 2;
+
+            //AE + 2 = B0
+            let (newPC, cyclesTaken) = executeInstruction($inst, &mut cpu, &mut mem);
+
+            assert!(cyclesTaken == 4);
+            assert!(newPC == cpu.PC + 1);
+            assert!(cpu.A == 0xB0);
+
+            //H set
+            assert!(isFlagSet(Half, cpu.F));
+            assert!(!isFlagSet(Carry, cpu.F));
+            assert!(!isFlagSet(Zero, cpu.F));
+            assert!(!isFlagSet(Neg, cpu.F));
+            
+            cpu.A = 0xFF;
+            
+            cpu.$srcReg = 1;
+
+            //FF + 1 = 0
+            let (newPC, cyclesTaken) = executeInstruction($inst, &mut cpu, &mut mem);
+
+            assert!(cyclesTaken == 4);
+            assert!(newPC == cpu.PC + 1);
+            assert!(cpu.A == 0x0);
+
+            //C, Z, H set
+            assert!(isFlagSet(Half, cpu.F));
+            assert!(isFlagSet(Carry, cpu.F));
+            assert!(isFlagSet(Zero, cpu.F));
+            assert!(!isFlagSet(Neg, cpu.F));
+
+        })
+    }
+
+    testAdd8!(B, 0x80);
+    testAdd8!(C, 0x81);
+    testAdd8!(D, 0x82);
+    testAdd8!(E, 0x83);
+    testAdd8!(H, 0x84);
+    testAdd8!(L, 0x85);
+}

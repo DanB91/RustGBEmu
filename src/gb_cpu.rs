@@ -94,6 +94,51 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
     }
 
     /*
+     * Used for ADD and ADC which are 8-bit additions to register
+     *
+     * Args:
+     *      src:  Amount to add to A
+     *      shouldAddCarry: true if ADC instruction, false if ADD instruction
+     *
+     * Example:
+     *      add8Bit!(B, true); //ADC A, B
+     */
+    macro_rules! add8Bit {
+        ($src: expr, $shouldAddCarry: expr) => ({
+            let mut sum = (cpu.A as u16).wrapping_add($src as u16); 
+
+            clearFlag!(Neg);
+
+            if $shouldAddCarry {
+                sum = sum.wrapping_add(if isFlagSet!(Carry) {1} else {0});
+            } 
+
+            if (sum & 0xFF) == 0 {
+                setFlag!(Zero);
+            }
+            else {
+                clearFlag!(Zero);
+            }
+
+            if (sum & 0x100) != 0 {
+                setFlag!(Carry);
+            }
+            else {
+                clearFlag!(Carry);
+            }
+
+
+            if (cpu.A ^ $src ^ (sum & 0xFF) as u8) & 0x10 != 0 {
+                setFlag!(Half);
+            }
+            else {
+                clearFlag!(Half);
+            }
+
+            cpu.A = (sum & 0xFF) as u8;
+        })
+    }
+    /*
      * Used for instructions that add a register pair to the HL register pair
      *
      * Args:
@@ -729,6 +774,103 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
             (cpu.PC.wrapping_add(1), 4)
         },
+
+        0x40...0x6F | 0x78...0x7F => { //8 bit load instructions except for LD (HL), Reg
+
+            let src = match (instruction & 0xF) % 8 {
+                0 => cpu.B,
+                1 => cpu.C,
+                2 => cpu.D,
+                3 => cpu.E,
+                4 => cpu.H,
+                5 => cpu.L,
+                6 => readByteFromMemory(mem, word(cpu.H, cpu.L)),
+                7 => cpu.A,
+                _ => panic!("Unreachable")
+            };
+
+            let dest = match instruction {
+                0x40...0x47 => &mut cpu.B,
+                0x48...0x4F => &mut cpu.C,
+                0x50...0x57 => &mut cpu.D,
+                0x58...0x5F => &mut cpu.E,
+                0x60...0x67 => &mut cpu.H,
+                0x68...0x6F => &mut cpu.L,
+                0x78...0x7F => &mut cpu.A,
+                _ => panic!("Unreachable")
+            };
+
+            *dest = src;
+
+            //instructions that have (HL) in the instruction take 8 cycles as opposed to 4
+            if ((instruction & 0xF) % 8) == 6 {
+                (cpu.PC.wrapping_add(1), 8)
+            }
+            else {
+                (cpu.PC.wrapping_add(1), 4)
+            }
+        },
+
+        0x70...0x75 | 0x77 => { //LD (HL), N
+
+            let src = match (instruction & 0xF) % 8 {
+                0 => cpu.B,
+                1 => cpu.C,
+                2 => cpu.D,
+                3 => cpu.E,
+                4 => cpu.H,
+                5 => cpu.L,
+                7 => cpu.A,
+                _ => panic!("Unreachable")
+            };
+
+            writeByteToMemory(mem, src, word(cpu.H, cpu.L));
+
+            (cpu.PC.wrapping_add(1), 8)
+
+        },
+
+        0x76 => { //HALT
+            //TODO(DanB): to be implemented....
+            (cpu.PC.wrapping_add(1), 4)
+
+        },
+
+        0x80...0xBF => { //ADD, ADC, SUB, SBC, AND, XOR, OR and CP instructions, where destination is register A
+            let src = match (instruction & 0xF) % 8 {
+                0 => cpu.B,
+                1 => cpu.C,
+                2 => cpu.D,
+                3 => cpu.E,
+                4 => cpu.H,
+                5 => cpu.L,
+                6 => readByteFromMemory(mem, word(cpu.H, cpu.L)),
+                7 => cpu.A,
+                _ => panic!("Unreachable")
+            };
+
+
+            match instruction {
+                0x80...0x87 => { //ADD A, N
+                    add8Bit!(src, false);
+                }
+
+                0x88...0x8F => { //ADC A, N
+                    add8Bit!(src, true);
+                }
+                _ => panic!("Unreachable")
+            }
+
+            if ((instruction & 0xF) % 8) == 6 {
+                (cpu.PC.wrapping_add(1), 8)
+            }
+            else {
+                (cpu.PC.wrapping_add(1), 4)
+            }
+
+
+        },
+
         _ => { //will act as a NOP for now
             (cpu.PC.wrapping_add(1), 4)
         },
