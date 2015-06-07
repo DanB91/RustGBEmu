@@ -72,7 +72,7 @@ fn main() {
         println!("Total Cycles: {}, Cycles just executed: {}", totalCycles, instructionCycles);
         println!("Currently in BIOS: {}", mem.inBios);
         println!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, cpu.F), isFlagSet(Flag::Neg, cpu.F), isFlagSet(Flag::Half, cpu.F), isFlagSet(Flag::Carry, cpu.F));
-        println!("PC: {:X}\tSP: {\t}", cpu.PC, cpu.SP);
+        println!("PC: {:X}\tSP: {:X}", cpu.PC, cpu.SP);
         println!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", cpu.A, cpu.F, cpu.B, cpu.C);
         println!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", cpu.D, cpu.E, cpu.H, cpu.L);
 

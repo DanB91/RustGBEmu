@@ -67,7 +67,6 @@ fn loadImm16(highDest: &mut u8, lowDest: &mut u8, PC: u16, mem: &MemoryState){
     *lowDest = readByteFromMemory(mem, PC.wrapping_add(1));
 }
 
-//TODO(DanB): Should I move these macros into executeInstruction()?
 
 
 
@@ -136,6 +135,55 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             }
 
             cpu.A = (sum & 0xFF) as u8;
+        })
+    }
+    /*
+     * Used for SUB and SBC which are 8-bit additions to register
+     *
+     * Args:
+     *      src:  Amount to subtract from A
+     *      shouldAddCarry: true if SBC instruction, false if SUB instruction
+     *      shouldSaveResult: true if SBC or SUB, false if CP
+     *
+     * Example:
+     *      sub8Bit!(B, true); //SBC A, B
+     */
+    macro_rules! sub8Bit {
+        ($src: expr, $shouldSubCarry: expr, $shouldSaveResult: expr) => ({
+            let mut diff = (cpu.A as u16).wrapping_sub($src as u16); 
+
+            setFlag!(Neg);
+
+            if $shouldSubCarry {
+                diff = diff.wrapping_sub(if isFlagSet!(Carry) {1} else {0});
+            } 
+
+            if (diff & 0xFF) == 0 {
+                setFlag!(Zero);
+            }
+            else {
+                clearFlag!(Zero);
+            }
+
+            //NOTE(DanB): Setting of flags may be wrong in GB CPU manual.  Using Z80's spec
+            if diff > 0xFF {
+                setFlag!(Carry);
+            }
+            else {
+                clearFlag!(Carry);
+            }
+
+
+            if (cpu.A ^ $src ^ (diff & 0xFF) as u8) & 0x10 != 0 {
+                setFlag!(Half);
+            }
+            else {
+                clearFlag!(Half);
+            }
+
+            if $shouldSaveResult {
+                cpu.A = (diff & 0xFF) as u8;
+            }
         })
     }
     /*
@@ -858,20 +906,80 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
                 0x88...0x8F => { //ADC A, N
                     add8Bit!(src, true);
                 }
+                
+                0x90...0x97 => { //SUB N
+                    sub8Bit!(src, false, true);
+                }
+                
+                0x98...0x9F => { //SBC N
+                    sub8Bit!(src, true, true);
+                }
+
+                0xA0...0xA7 => { //AND N
+                    cpu.A &= src;
+                    
+                    setFlag!(Half);
+                    clearFlag!(Neg);
+                    clearFlag!(Carry);
+
+                    if cpu.A == 0 {
+                        setFlag!(Zero);
+                    }
+                    else {
+                        clearFlag!(Zero);
+                    }
+
+                }
+
+                0xA8...0xAF => { //XOR N
+                    cpu.A ^= src;
+                    
+                    clearFlag!(Half);
+                    clearFlag!(Neg);
+                    clearFlag!(Carry);
+
+                    if cpu.A == 0 {
+                        setFlag!(Zero);
+                    }
+                    else {
+                        clearFlag!(Zero);
+                    }
+                }
+
+                0xB0...0xB7 => { //OR N
+
+                    cpu.A |= src;
+                    
+                    clearFlag!(Half);
+                    clearFlag!(Neg);
+                    clearFlag!(Carry);
+
+                    if cpu.A == 0 {
+                        setFlag!(Zero);
+                    }
+                    else {
+                        clearFlag!(Zero);
+                    }
+                }
+
+                0xB8...0xBF => { //CP N
+                    sub8Bit!(src, false, false);
+                }
+                
                 _ => panic!("Unreachable")
             }
 
             if ((instruction & 0xF) % 8) == 6 {
-                (cpu.PC.wrapping_add(1), 8)
+                (cpu.PC.wrapping_add(1), 8)  //if operating from (HL), inst takes 8 cycles
             }
             else {
-                (cpu.PC.wrapping_add(1), 4)
+                (cpu.PC.wrapping_add(1), 4) //operating from register takes 4 cycles
             }
 
 
         },
 
-        _ => { //will act as a NOP for now
+        _ => { //TODO:will act as a NOP for now
             (cpu.PC.wrapping_add(1), 4)
         },
         
