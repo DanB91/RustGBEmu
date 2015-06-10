@@ -29,6 +29,7 @@ fn testingCPU() -> CPUState {
     let mut cpu = CPUState::new();
 
     cpu.PC = 0xC000; //set PC to beginning of working RAM
+    cpu.SP = 0xFFFE; //set stack to start at FFFE
 
     cpu
 }
@@ -770,7 +771,7 @@ fn jumpRelative() { //0x18
 
         let (newPC, cyclesTaken) = executeInstruction(0x18, &mut cpu, &mut mem);
 
-        assert!(newPC  == (cpu.PC as i16 + sOffset as i16 + 2) as u16);
+        assert!(newPC  == (cpu.PC as i16 + sOffset as i16 ) as u16);
         assert!(cyclesTaken == 12);
 
     }
@@ -799,7 +800,7 @@ fn jumpRelativeWithCondition() { //0x20
 
         let (newPC, cyclesTaken) = executeInstruction(inst, &mut cpu, &mut mem);
 
-        assert!(newPC  == (cpu.PC as i16 - 128 + 2) as u16);
+        assert!(newPC  == (cpu.PC as i16 - 128) as u16);
         assert!(cyclesTaken == 12);
 
         //should not perform jump
@@ -2540,23 +2541,279 @@ fn compare8BitFromMemAtHL() { //0xBE
 #[test]
 fn compareAToA() { //0xBF
 
-   
+
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+    cpu.A = 0xAA;
+
+    //AA == AA, Z set, C clear
+    let (newPC, cyclesTaken) = executeInstruction(0xBF, &mut cpu, &mut mem);
+
+    assert!(cyclesTaken == 4);
+    assert!(newPC == cpu.PC + 1);
+    assert!(cpu.A == 0xAA);
+
+    //N, Z, H set
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+    assert!(isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+ 
+}
+
+#[test]
+fn callAndReturn() {
+
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+    let oldPC = cpu.PC;
+
+    writeWordToMemory(&mut mem, 0xCC00, cpu.PC+1); //call address 0xCC00
+
+    //execute CALL a16
+    let (newPC, cyclesTaken) = executeInstruction(0xCD, &mut cpu, &mut mem);
+
+    assert_eq!(newPC, 0xCC00);
+    assert_eq!(readWordFromMemory(&mut mem, cpu.SP), oldPC + 3);
+    assert_eq!(cyclesTaken, 24);
+
+    //execute RET
+    let (newPC, cyclesTaken) = executeInstruction(0xC9, &mut cpu, &mut mem);
+    
+    assert_eq!(newPC, oldPC + 3);
+    assert_eq!(readWordFromMemory(&mut mem, cpu.SP), 0);
+    assert_eq!(cyclesTaken, 16);
+
+}
+#[test]
+fn returnFromProcConditional() {
+
+    fn testRET(flag: Flag, shouldBeSet: bool, inst: u8) {
+        let mut cpu = testingCPU();
+        let mut mem = tetrisMemoryState();
+
+        let mut oldPC = cpu.PC;
+
+        writeWordToMemory(&mut mem, 0xCC00, cpu.PC+1); //call address 0xCC00
+
+        //execute CALL a16
+        executeInstruction(0xCD, &mut cpu, &mut mem);
+
+        if shouldBeSet {
+            setFlag(flag, &mut cpu.F);
+        }
+        else {
+            clearFlag(flag, &mut cpu.F);
+        }
+
+
+        //execute RET
+        let (newPC, cyclesTaken) = executeInstruction(inst, &mut cpu, &mut mem);
+
+        assert_eq!(newPC, oldPC + 3);
+        assert_eq!(readWordFromMemory(&mut mem, cpu.SP), 0);
+        assert_eq!(cyclesTaken, 20);
+
+
+
+        //should not perform jump
+        if !shouldBeSet {
+            setFlag(flag, &mut cpu.F);
+        }
+        else {
+            clearFlag(flag, &mut cpu.F);
+        }
+
+        oldPC = cpu.PC;
+
+        //execute CALL a16
+        executeInstruction(0xCD, &mut cpu, &mut mem);
+
+        //execute RET
+        let (newPC, cyclesTaken) = executeInstruction(inst, &mut cpu, &mut mem);
+
+        assert_eq!(newPC, cpu.PC + 1);
+        assert_eq!(readWordFromMemory(&mut mem, cpu.SP), oldPC + 3);  //make sure the return address is still on the stack
+        assert_eq!(cyclesTaken, 8);
+    }
+
+    testRET(Zero, false, 0xC0);
+    testRET(Zero, true, 0xC8);
+    testRET(Carry, false, 0xD0);
+    testRET(Carry, true, 0xD8);
+    
+
+}
+
+#[test]
+fn callConditional() {
+
+    fn testCALL(flag: Flag, shouldBeSet: bool, inst: u8) {
+        let mut cpu = testingCPU();
+        let mut mem = tetrisMemoryState();
+
+        let oldPC = cpu.PC;
+
+        writeWordToMemory(&mut mem, 0xCC00, cpu.PC+1); //call address 0xCC00
+
+        if shouldBeSet {
+            setFlag(flag, &mut cpu.F);
+        }
+        else {
+            clearFlag(flag, &mut cpu.F);
+        }
+
+
+        //execute CALL CC00
+        let (newPC, cyclesTaken) = executeInstruction(inst, &mut cpu, &mut mem);
+
+        assert_eq!(newPC, 0xCC00);
+        assert_eq!(readWordFromMemory(&mut mem, cpu.SP), oldPC + 3);
+        assert_eq!(cyclesTaken, 24);
+
+
+
+        //should not perform jump
+        if !shouldBeSet {
+            setFlag(flag, &mut cpu.F);
+        }
+        else {
+            clearFlag(flag, &mut cpu.F);
+        }
+
+
+        //execute CALL CC00
+        let (newPC, cyclesTaken) = executeInstruction(inst, &mut cpu, &mut mem);
+
+        assert_eq!(newPC, cpu.PC + 3);
+        assert_eq!(cyclesTaken, 12);
+    }
+
+    testCALL(Zero, false, 0xC4);
+    testCALL(Zero, true, 0xCC);
+
+    testCALL(Carry, false, 0xD4);
+    testCALL(Carry, true, 0xDC);
+}
+
+#[test]
+fn pop16() {
+    macro_rules! testPop16 {
+        ($highReg: ident, $lowReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
             let mut mem = tetrisMemoryState();
 
-            cpu.A = 0xAA;
-            
-            //AA == AA, Z set, C clear
-            let (newPC, cyclesTaken) = executeInstruction(0xBF, &mut cpu, &mut mem);
+            writeWordToMemory(&mut mem, 0xAABB, 0xCCD0);
+            cpu.SP = 0xCCD0;
 
-            assert!(cyclesTaken == 4);
-            assert!(newPC == cpu.PC + 1);
-            assert!(cpu.A == 0xAA);
+            let (newPC, cyclesTaken) = executeInstruction($inst, &mut cpu, &mut mem);
 
-            //N, Z, H set
-            assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Carry, cpu.F));
-            assert!(isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
- 
+            assert_eq!(cpu.SP, 0xCCD2);
+            assert_eq!(word(cpu.$highReg, cpu.$lowReg), 0xAABB);
+            assert_eq!(cyclesTaken, 12);
+            assert_eq!(newPC, cpu.PC+1);
+
+        })
+    }
+
+   testPop16!(B,C,0xC1); 
+   testPop16!(D,E,0xD1); 
+   testPop16!(H,L,0xE1); 
+   testPop16!(A,F,0xF1); 
+}
+
+#[test]
+fn push16() {
+    macro_rules! testPush16 {
+        ($highReg: ident, $lowReg: ident, $inst: expr) => ({
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+            cpu.SP = 0xCCD0;
+
+            //push AABB on to stack
+            cpu.$highReg = 0xAA;
+            cpu.$lowReg = 0xBB;
+
+
+            let (newPC, cyclesTaken) = executeInstruction($inst, &mut cpu, &mut mem);
+
+            assert_eq!(cpu.SP, 0xCCCE);
+            assert_eq!(readWordFromMemory(&mut mem, cpu.SP), 0xAABB);
+            assert_eq!(cyclesTaken, 16);
+            assert_eq!(newPC, cpu.PC+1);
+
+        })
+    }
+
+    testPush16!(B,C,0xC5); 
+    testPush16!(D,E,0xD5); 
+    testPush16!(H,L,0xE5); 
+    testPush16!(A,F,0xF5); 
+
+}
+
+
+#[test]
+fn jumpAbsoluteConditional() { 
+
+    fn testJRC(flag: Flag, shouldBeSet: bool, inst: u8) {
+        let mut cpu = testingCPU();
+        let mut mem = tetrisMemoryState();
+
+        //should perform jump
+        if shouldBeSet {
+            setFlag(flag, &mut cpu.F);
+        }
+        else {
+            clearFlag(flag, &mut cpu.F);
+        }
+
+        //load address to jump to 
+        writeWordToMemory(&mut mem, 0xAABB, cpu.PC+1);
+
+        let (newPC, cyclesTaken) = executeInstruction(inst, &mut cpu, &mut mem);
+
+        assert_eq!(newPC, 0xAABB);
+        assert_eq!(cyclesTaken, 16);
+
+        //should not perform jump
+        if !shouldBeSet {
+            setFlag(flag, &mut cpu.F);
+        }
+        else {
+            clearFlag(flag, &mut cpu.F);
+        }
+
+        //load address 
+        writeWordToMemory(&mut mem, 0xAABB, cpu.PC+1);
+
+        let (newPC, cyclesTaken) = executeInstruction(inst, &mut cpu, &mut mem);
+
+        assert_eq!(newPC, cpu.PC + 3);
+        assert_eq!(cyclesTaken, 12);
+
+    }
+
+    testJRC(Zero, false, 0xC2);
+    testJRC(Zero, true, 0xCA);
+    testJRC(Carry, false, 0xD2);
+    testJRC(Carry, true, 0xDA);
+
+
+}
+
+#[test]
+fn jumpAbsolute() {
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+    writeWordToMemory(&mut mem, 0xAABB, cpu.PC+1);
+    
+    let (newPC, cyclesTaken) = executeInstruction(0xC3, &mut cpu, &mut mem);
+
+    assert_eq!(newPC, 0xAABB);
+    assert_eq!(cyclesTaken, 16);
 }

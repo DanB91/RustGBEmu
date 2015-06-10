@@ -67,7 +67,36 @@ fn loadImm16(highDest: &mut u8, lowDest: &mut u8, PC: u16, mem: &MemoryState){
     *lowDest = readByteFromMemory(mem, PC.wrapping_add(1));
 }
 
+/*
+ * Pushes a 16bit value onto the stack
+ *
+ * Args:
+ *      mem: The memory state of the Game Boy which contains the stack
+ *      value: the value to push onto the stack
+ *      SP: the stack pointer
+ *
+ */
+fn pushOnToStack(mem: &mut MemoryState, value: u16, SP: &mut u16) {
+    *SP = SP.wrapping_sub(2);
+    writeWordToMemory(mem, value, *SP);
+}
 
+/*
+ * Pops a 16bit value off the stack
+ *
+ * Args:
+ *      mem: The memory state of the Game Boy which contains the stack
+ *      SP: the stack pointer
+ *
+ * Return: The 16bit value off of the stack
+ *
+ */
+fn popOffOfStack(mem: &MemoryState, SP: &mut u16) -> u16 {
+    let ret = readWordFromMemory(mem, *SP);
+    *SP = SP.wrapping_add(2);
+
+    ret
+}
 
 
 //returns a tuple of the form (new_PC_value, number_of_cycles_passed)
@@ -356,17 +385,127 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
      */
     macro_rules! jumpRelative {
         ($condition: expr) => ({
+
             //whether or not to do the actual jump
-            let offset = if $condition {
-                readByteFromMemory(&mem, cpu.PC.wrapping_add(1)) as i8
+            if $condition {
+                let offset = readByteFromMemory(&mem, cpu.PC.wrapping_add(1)) as i8;
+                (((cpu.PC as i16).wrapping_add(offset as i16)) as u16, 12)
             }
             else {
-                0
-            };
+                (cpu.PC.wrapping_add(2), 8)
+            }
 
-            let cycles = if $condition {12} else {8};
 
-            (((cpu.PC as i16).wrapping_add(2).wrapping_add(offset as i16)) as u16, cycles)
+        })
+    }
+
+    /*
+     * Pops word from stack into given register pair
+     *
+     * Args:
+     *      highReg: High byte of register pair
+     *      lowReg: Low byte of register pair
+     *
+     * Example:
+     *      pop16!(B,C) //pops 2 bytes into register pair BC
+     *
+     */
+    macro_rules! pop16 {
+        ($highReg: ident, $lowReg: ident) => ({
+            let word = popOffOfStack(mem, &mut cpu.SP);
+            cpu.$highReg = hb(word);
+            cpu.$lowReg = lb(word);
+
+            (cpu.PC.wrapping_add(1), 12)
+        })
+    }
+
+    /*
+     * Pushes word onto stack into given register pair
+     *
+     * Args:
+     *      highReg: High byte of register pair
+     *      lowReg: Low byte of register pair
+     *
+     * Example:
+     *      push16!(B,C) //pushes 2 bytes from register pair BC
+     *
+     */
+    macro_rules! push16 {
+        ($highReg: ident, $lowReg: ident) => ({
+            pushOnToStack(mem, word(cpu.$highReg, cpu.$lowReg), &mut cpu.SP);
+            (cpu.PC.wrapping_add(1), 16)
+        })
+    }
+
+    /*
+     * Performs the JP series of instructions
+     *
+     * Args:
+     *      condition: whether to do the jump or not.
+     *
+     * Example:
+     *      jumpAbsolute(isFlagSet!(Carry)) //jump if Carry flag is set
+     *
+     */
+    macro_rules! jumpAbsolute {
+        ($condition: expr) => ({
+            
+            //should we perform the jump?
+            if $condition {
+                (readWordFromMemory(&mem, cpu.PC.wrapping_add(1)), 16)
+            }
+            else {
+                (cpu.PC.wrapping_add(3), 12)
+            }
+        })
+    }
+
+    /*
+     * Performs the RET series of instructions
+     *
+     * Args:
+     *      condition: whether to return from the procedure or not.
+     *
+     * Example:
+     *      returnFromProc(isFlagSet!(Carry)) //return from procedure if Carry flag is set
+     *
+     */
+    macro_rules! returnFromProc {
+        ($condition: expr) => ({
+            if $condition {
+                //pop return address off stack
+                (popOffOfStack(mem, &mut cpu.SP), 20)
+            }
+            else {
+                (cpu.PC.wrapping_add(1), 8)
+            }
+
+        })
+    }
+
+    /*
+     * Performs the CALL series of instructions
+     *
+     * Args:
+     *      condition: whether to call the procedure or not.
+     *
+     * Example:
+     *      callProc(isFlagSet!(Carry)) //call procedure if Carry flag is set
+     *
+     */
+    macro_rules! callProc {
+        ($condition: expr) => ({
+            if $condition {
+                //save PC
+                pushOnToStack(mem, cpu.PC.wrapping_add(3), &mut cpu.SP);
+
+                //jump to procedure
+                (readWordFromMemory(mem, cpu.PC.wrapping_add(1)), 24)
+            }
+            else {
+                (cpu.PC.wrapping_add(3), 12)
+            }
         })
     }
 
@@ -979,6 +1118,98 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
         },
 
+        0xC0 => { //RET NZ
+            returnFromProc!(!isFlagSet!(Zero))
+        },
+
+        0xC1 => { //POP BC
+            pop16!(B,C)
+
+        },
+
+        0xC2 => { //JP NZ, a16
+            jumpAbsolute!(!isFlagSet!(Zero))
+        }
+
+        0xC3 => { //JP a16
+            jumpAbsolute!(true)
+        },
+
+        0xC4 => { //CALL NZ, a16
+            callProc!(!isFlagSet!(Zero))
+        },
+
+        0xC5 => { //PUSH BC
+            push16!(B,C)
+        }
+
+        0xC8 => { //RET Z 
+            returnFromProc!(isFlagSet!(Zero))
+        },
+
+        0xC9 => { //RET
+            (popOffOfStack(mem, &mut cpu.SP), 16)
+        }
+
+        0xCA => { //JP Z, a16
+            jumpAbsolute!(isFlagSet!(Zero))
+        },
+
+        0xCC => { //CALL Z, a16
+            callProc!(isFlagSet!(Zero))
+        },
+        
+        0xCD => { //CALL a16
+            callProc!(true)
+        },
+
+        0xD0 => { //RET NC
+            returnFromProc!(!isFlagSet!(Carry))
+        },
+
+        0xD1 => { //POP DE
+            pop16!(D,E)
+        },
+
+        0xD2 => { //JP NC, a16
+            jumpAbsolute!(!isFlagSet!(Carry))
+        },
+        
+        0xD4 => { //CALL NC, a16
+            callProc!(!isFlagSet!(Carry))
+        },
+        
+        0xD5 => { //PUSH DE
+            push16!(D,E)
+        },
+        
+        0xD8 => { //RET C
+            returnFromProc!(isFlagSet!(Carry))
+        }
+
+        0xDA => { // JP C, a16
+            jumpAbsolute!(isFlagSet!(Carry))
+        },
+
+        0xDC => { //CALL C, a16
+            callProc!(isFlagSet!(Carry))
+        },
+
+        0xE1 => { //POP HL
+            pop16!(H,L)
+        }
+
+        0xE5 => { //PUSH HL
+            push16!(H,L)
+        }
+
+        0xF1 => { //POP AF
+            pop16!(A,F)
+        }
+
+        0xF5 => { //PUSH AF
+            push16!(A,F)
+        }
         _ => { //TODO:will act as a NOP for now
             (cpu.PC.wrapping_add(1), 4)
         },
