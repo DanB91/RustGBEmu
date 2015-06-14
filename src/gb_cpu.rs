@@ -98,6 +98,9 @@ fn popOffOfStack(mem: &MemoryState, SP: &mut u16) -> u16 {
     ret
 }
 
+fn enableInterrupts() {
+    //TODO(DanB): To be implemented
+}
 
 //returns a tuple of the form (new_PC_value, number_of_cycles_passed)
 
@@ -508,6 +511,23 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             }
         })
     }
+
+    /*
+     * Used for RST instructions
+     *
+     * Args:
+     *      restartAddress: Argument to RST instruction
+     *
+     * Example:
+     *      restartAddress(0) //isntruction RST 00
+     */
+    macro_rules! restart {
+        ($restartAddress: expr) => ({
+            pushOnToStack(mem, cpu.PC.wrapping_add(1), &mut cpu.SP);
+            ($restartAddress, 16)
+        })
+    }
+
 
     match instruction {
         0x0 => { //NOP
@@ -1023,38 +1043,64 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
         },
 
-        0x80...0xBF => { //ADD, ADC, SUB, SBC, AND, XOR, OR and CP instructions, where destination is register A
-            let src = match (instruction & 0xF) % 8 {
-                0 => cpu.B,
-                1 => cpu.C,
-                2 => cpu.D,
-                3 => cpu.E,
-                4 => cpu.H,
-                5 => cpu.L,
-                6 => readByteFromMemory(mem, word(cpu.H, cpu.L)),
-                7 => cpu.A,
-                _ => panic!("Unreachable")
-            };
+        0x80...0xBF | 
+            0xC6 | 0xD6 | 0xE6 | 0xF6 | 
+            0xCE | 0xDE | 0xEE | 0xFE  => { //ADD, ADC, SUB, SBC, AND, XOR, OR and CP instructions, where destination is register A
+                let src: u8;
+                let ret: (u16, u32);
+
+                //set from where A is loaded into and set the new PC and how many cycles
+                match instruction {
+                    0x80...0xBF => {
+                        src = match (instruction & 0xF) % 8 {
+                            0 => cpu.B,
+                            1 => cpu.C,
+                            2 => cpu.D,
+                            3 => cpu.E,
+                            4 => cpu.H,
+                            5 => cpu.L,
+                            6 => readByteFromMemory(mem, word(cpu.H, cpu.L)),
+                            7 => cpu.A,
+                            _ => panic!("Unreachable")
+                        };
+                        ret = 
+                            if ((instruction & 0xF) % 8) == 6 {
+                                (cpu.PC.wrapping_add(1), 8)  //if operating from (HL), inst takes 8 cycles
+                            }
+                            else {
+                                (cpu.PC.wrapping_add(1), 4) //operating from register takes 4 cycles
+                            };
+                    }, 
+
+                    0xC6 | 0xD6 | 0xE6 | 0xF6 |
+                           0xCE | 0xDE | 0xEE | 0xFE => {
+                        src = readByteFromMemory(mem, cpu.PC.wrapping_add(1));
+                        ret = (cpu.PC.wrapping_add(2), 8);
+                     },
+                     _ => panic!("Unreachable")
+                }
 
 
+
+            //execute instruction
             match instruction {
-                0x80...0x87 => { //ADD A, N
+                0x80...0x87 | 0xC6 => { //ADD A, N
                     add8Bit!(src, false);
                 }
 
-                0x88...0x8F => { //ADC A, N
+                0x88...0x8F | 0xCE => { //ADC A, N
                     add8Bit!(src, true);
                 }
                 
-                0x90...0x97 => { //SUB N
+                0x90...0x97 | 0xD6 => { //SUB N
                     sub8Bit!(src, false, true);
                 }
                 
-                0x98...0x9F => { //SBC N
+                0x98...0x9F | 0xDE => { //SBC N
                     sub8Bit!(src, true, true);
                 }
 
-                0xA0...0xA7 => { //AND N
+                0xA0...0xA7 | 0xE6 => { //AND N
                     cpu.A &= src;
                     
                     setFlag!(Half);
@@ -1070,7 +1116,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
                 }
 
-                0xA8...0xAF => { //XOR N
+                0xA8...0xAF | 0xEE => { //XOR N
                     cpu.A ^= src;
                     
                     clearFlag!(Half);
@@ -1085,7 +1131,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
                     }
                 }
 
-                0xB0...0xB7 => { //OR N
+                0xB0...0xB7 | 0xF6 => { //OR N
 
                     cpu.A |= src;
                     
@@ -1101,115 +1147,127 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
                     }
                 }
 
-                0xB8...0xBF => { //CP N
+                0xB8...0xBF | 0xFE => { //CP N
                     sub8Bit!(src, false, false);
                 }
                 
                 _ => panic!("Unreachable")
             }
 
-            if ((instruction & 0xF) % 8) == 6 {
-                (cpu.PC.wrapping_add(1), 8)  //if operating from (HL), inst takes 8 cycles
+            ret
+
+
+        },
+
+
+        0xC0 => returnFromProc!(!isFlagSet!(Zero)), //RET NZ
+        0xC1 => pop16!(B,C), //POP BC
+        0xC2 => jumpAbsolute!(!isFlagSet!(Zero)), //JP NZ, a16
+        0xC3 => jumpAbsolute!(true), //JP a16
+        0xC4 => callProc!(!isFlagSet!(Zero)), //CALL NZ, a16
+        0xC5 => push16!(B,C), //PUSH BC
+        //C6 implemented above
+        0xC7 => restart!(0x0), //RST 00H
+        0xC8 => returnFromProc!(isFlagSet!(Zero)), //RET Z 
+        0xC9 => (popOffOfStack(mem, &mut cpu.SP), 16), //RET
+        0xCA => jumpAbsolute!(isFlagSet!(Zero)), //JP Z, a16
+        0xCB => {
+            (cpu.PC.wrapping_add(1), 4)
+            //TODO CB instructions, NOP for now
+        }
+        0xCC => callProc!(isFlagSet!(Zero)), //CALL Z, a16
+        0xCD => callProc!(true), //CALL a16
+        //CE implemented above
+        0xCF => restart!(0x8), //RST 08H
+
+
+        0xD0 => returnFromProc!(!isFlagSet!(Carry)), //RET NC
+        0xD1 => pop16!(D,E), //POP DE
+        0xD2 => jumpAbsolute!(!isFlagSet!(Carry)), //JP NC, a16
+        //No D3
+        0xD4 => callProc!(!isFlagSet!(Carry)), //CALL NC, a16
+        0xD5 => push16!(D,E), //PUSH DE
+        //D6 implmented above
+        0xD7 => restart!(0x10), //RST 10H
+        0xD8 => returnFromProc!(isFlagSet!(Carry)), //RET C
+        0xD9 => { //RETI
+            enableInterrupts();
+            returnFromProc!(true)
+        }
+        0xDA => jumpAbsolute!(isFlagSet!(Carry)), // JP C, a16
+        //No DB
+        0xDC => callProc!(isFlagSet!(Carry)), //CALL C, a16
+        //No DD
+        //DE implemented above
+        0xDF => restart!(0x18), //RST 18H
+
+
+        0xE0 => { //LDH (a8), A 
+            //I can use "+" here since readByteFromMemory can't return a value high enough to wrap
+            let addr = readByteFromMemory(mem, cpu.PC.wrapping_add(1)) as u16 + 0xFF00; 
+            writeByteToMemory(mem, cpu.A, addr);
+            (cpu.PC.wrapping_add(2), 12)
+        }
+        0xE1 => pop16!(H,L), //POP HL
+        0xE2 => { //LD (C), A 
+            //I can use "+" here since readByteFromMemory can't return a value high enough to wrap
+            let addr = cpu.C as u16 + 0xFF00; 
+            writeByteToMemory(mem, cpu.A, addr);
+            (cpu.PC.wrapping_add(1), 8)
+        }
+        //No E3
+        //No E4
+        0xE5 => push16!(H,L), //PUSH HL
+        //E6 implemented above
+        0xE7 => restart!(0x20), //RST 20H
+        0xE8 => { //ADD SP, r8
+            //the "as i8 as i32" propagates the sign bit
+            let addend = readByteFromMemory(mem, cpu.PC.wrapping_add(1)) as i8  as i32;
+            let signedSP = cpu.SP as i32;
+            let sum = signedSP.wrapping_add(addend);
+
+            let bitsCarried = addend ^ signedSP ^ (sum & 0xFFFF);
+
+            clearFlag!(Zero);
+            clearFlag!(Neg);
+
+            //only set the Half and Carry flags on positive numbers
+            //TODO(DanB): Not sure if this is correct.  Documentation is poor
+            //and every emulator seems to set these differently
+            
+            //set/clear half
+            if bitsCarried & 0x10 != 0 && addend > 0 {
+                setFlag!(Half);
             }
             else {
-                (cpu.PC.wrapping_add(1), 4) //operating from register takes 4 cycles
+                clearFlag!(Half);
             }
 
+            //set/clear carry
+            if bitsCarried & 0x100 != 0 && addend > 0 {
+                setFlag!(Carry);
+            }
+            else {
+                clearFlag!(Carry);
+            }
 
-        },
+            cpu.SP = signedSP.wrapping_add(addend) as u16;
 
-        0xC0 => { //RET NZ
-            returnFromProc!(!isFlagSet!(Zero))
-        },
+            (cpu.PC.wrapping_add(2), 16)
 
-        0xC1 => { //POP BC
-            pop16!(B,C)
 
-        },
-
-        0xC2 => { //JP NZ, a16
-            jumpAbsolute!(!isFlagSet!(Zero))
         }
 
-        0xC3 => { //JP a16
-            jumpAbsolute!(true)
-        },
+        0xEF => restart!(0x28), //RST 28H
 
-        0xC4 => { //CALL NZ, a16
-            callProc!(!isFlagSet!(Zero))
-        },
-
-        0xC5 => { //PUSH BC
-            push16!(B,C)
-        }
-
-        0xC8 => { //RET Z 
-            returnFromProc!(isFlagSet!(Zero))
-        },
-
-        0xC9 => { //RET
-            (popOffOfStack(mem, &mut cpu.SP), 16)
-        }
-
-        0xCA => { //JP Z, a16
-            jumpAbsolute!(isFlagSet!(Zero))
-        },
-
-        0xCC => { //CALL Z, a16
-            callProc!(isFlagSet!(Zero))
-        },
+        0xF1 => pop16!(A,F), //POP AF
         
-        0xCD => { //CALL a16
-            callProc!(true)
-        },
+        0xF5 => push16!(A,F), //PUSH AF
 
-        0xD0 => { //RET NC
-            returnFromProc!(!isFlagSet!(Carry))
-        },
-
-        0xD1 => { //POP DE
-            pop16!(D,E)
-        },
-
-        0xD2 => { //JP NC, a16
-            jumpAbsolute!(!isFlagSet!(Carry))
-        },
+        0xF7 => restart!(0x30), //RST 30H
         
-        0xD4 => { //CALL NC, a16
-            callProc!(!isFlagSet!(Carry))
-        },
-        
-        0xD5 => { //PUSH DE
-            push16!(D,E)
-        },
-        
-        0xD8 => { //RET C
-            returnFromProc!(isFlagSet!(Carry))
-        }
+        0xFF => restart!(0x38), //RST 38H
 
-        0xDA => { // JP C, a16
-            jumpAbsolute!(isFlagSet!(Carry))
-        },
-
-        0xDC => { //CALL C, a16
-            callProc!(isFlagSet!(Carry))
-        },
-
-        0xE1 => { //POP HL
-            pop16!(H,L)
-        }
-
-        0xE5 => { //PUSH HL
-            push16!(H,L)
-        }
-
-        0xF1 => { //POP AF
-            pop16!(A,F)
-        }
-
-        0xF5 => { //PUSH AF
-            push16!(A,F)
-        }
         _ => { //TODO:will act as a NOP for now
             (cpu.PC.wrapping_add(1), 4)
         },
