@@ -3218,3 +3218,18 @@ fn addToSPSigned() { //E8
     assert!(!isFlagSet(Zero, cpu.F));
     assert!(!isFlagSet(Neg, cpu.F));
 }
+
+fn jumpUsingHL() {//E9
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+    cpu.H = 0xAA;
+    cpu.B = 0xBB;
+
+    //jump to 0xAABB
+    let (newPC, cyclesTaken) = executeInstruction(0xE9, &mut cpu, &mut mem);
+    
+    assert_eq!(newPC, 0xAABB);
+    assert_eq!(cyclesTaken, 8);
+
+}

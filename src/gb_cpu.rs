@@ -1257,6 +1257,8 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
 
         }
+        0xE9 => (word(cpu.H, cpu.L), 4), //JP (HL)
+
 
         0xEF => restart!(0x28), //RST 28H
 
