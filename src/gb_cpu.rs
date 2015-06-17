@@ -102,6 +102,10 @@ fn enableInterrupts() {
     //TODO(DanB): To be implemented
 }
 
+fn disableInterrupts() {
+    //TODO(DanB): To be implemented
+}
+
 //returns a tuple of the form (new_PC_value, number_of_cycles_passed)
 
 //NOTE(DanB) the reason I return these values instead of modifying them is because I constantly
@@ -528,6 +532,52 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         })
     }
 
+    /*
+     * Used for instructions that add SP and immediate 8-bit values
+     *
+     * Args:
+     *      value: Value to add SP with
+     *
+     * Example:
+     *      cpu.SP = addSPAndValue(); //add SP and next byte in
+     *      memory
+     */
+    macro_rules! addSPAndValue {
+        () => ({
+
+            //the "as i8 as i32" propagates the sign bit
+            let addend = readByteFromMemory(mem, cpu.PC.wrapping_add(1)) as i8  as i32;
+            let signedSP = cpu.SP as i32;
+            let sum = signedSP.wrapping_add(addend);
+
+            let bitsCarried = addend ^ signedSP ^ (sum & 0xFFFF);
+
+            clearFlag!(Zero);
+            clearFlag!(Neg);
+
+            //only set the Half and Carry flags on positive numbers
+            //TODO(DanB): Not sure if this is correct.  Documentation is poor
+            //and every emulator seems to set these differently
+
+            //set/clear half
+            if bitsCarried & 0x10 != 0 && addend > 0 {
+                setFlag!(Half);
+            }
+            else {
+                clearFlag!(Half);
+            }
+
+            //set/clear carry
+            if bitsCarried & 0x100 != 0 && addend > 0 {
+                setFlag!(Carry);
+            }
+            else {
+                clearFlag!(Carry);
+            }
+
+            signedSP.wrapping_add(addend) as u16
+        })
+    }
 
     match instruction {
         0x0 => { //NOP
@@ -1221,53 +1271,65 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         //E6 implemented above
         0xE7 => restart!(0x20), //RST 20H
         0xE8 => { //ADD SP, r8
-            //the "as i8 as i32" propagates the sign bit
-            let addend = readByteFromMemory(mem, cpu.PC.wrapping_add(1)) as i8  as i32;
-            let signedSP = cpu.SP as i32;
-            let sum = signedSP.wrapping_add(addend);
-
-            let bitsCarried = addend ^ signedSP ^ (sum & 0xFFFF);
-
-            clearFlag!(Zero);
-            clearFlag!(Neg);
-
-            //only set the Half and Carry flags on positive numbers
-            //TODO(DanB): Not sure if this is correct.  Documentation is poor
-            //and every emulator seems to set these differently
-            
-            //set/clear half
-            if bitsCarried & 0x10 != 0 && addend > 0 {
-                setFlag!(Half);
-            }
-            else {
-                clearFlag!(Half);
-            }
-
-            //set/clear carry
-            if bitsCarried & 0x100 != 0 && addend > 0 {
-                setFlag!(Carry);
-            }
-            else {
-                clearFlag!(Carry);
-            }
-
-            cpu.SP = signedSP.wrapping_add(addend) as u16;
-
+            cpu.SP = addSPAndValue!();
             (cpu.PC.wrapping_add(2), 16)
-
-
         }
         0xE9 => (word(cpu.H, cpu.L), 4), //JP (HL)
-
-
+        0xEA => { //LD (a16), A
+            let addr = readWordFromMemory(mem, cpu.PC.wrapping_add(1));
+            writeByteToMemory(mem, cpu.A, addr);
+            (cpu.PC.wrapping_add(3), 16)
+        }
+        //No EB
+        //No EC
+        //No ED
+        //EE implemented above
         0xEF => restart!(0x28), //RST 28H
 
+        0xF0 => { //LDH A, (a8)
+            //I can use "+" here since readByteFromMemory can't return a value high enough to wrap
+            let addr = readByteFromMemory(mem, cpu.PC.wrapping_add(1)) as u16 + 0xFF00; 
+            cpu.A = readByteFromMemory(mem, addr);
+            (cpu.PC.wrapping_add(2), 12)
+        }
         0xF1 => pop16!(A,F), //POP AF
-        
+        0xF2 => { //LDH A, (a8)
+            //I can use "+" here since readByteFromMemory can't return a value high enough to wrap
+            let addr = cpu.C as u16 + 0xFF00; 
+            cpu.A = readByteFromMemory(mem, addr);
+            (cpu.PC.wrapping_add(2), 12)
+        }
+        0xF3 => { //DI
+            disableInterrupts();
+            (cpu.PC.wrapping_add(1), 4)
+        },
+        //No F4
         0xF5 => push16!(A,F), //PUSH AF
-
+        //F6 Implemented above
         0xF7 => restart!(0x30), //RST 30H
-        
+        0xF8 => { //LD HL, SP + r8
+            let sum = addSPAndValue!();
+            cpu.H = hb(sum);
+            cpu.L = lb(sum);
+            (cpu.PC.wrapping_add(2), 12)
+
+        },
+        0xF9 => { //LD SP, HL
+            cpu.SP = word(cpu.H, cpu.L);
+            (cpu.PC.wrapping_add(1), 8)
+        },
+        0xFA => { //LD (a16), A
+            let addr = readWordFromMemory(mem, cpu.PC.wrapping_add(1));
+            cpu.A = readByteFromMemory(mem, addr);
+            (cpu.PC.wrapping_add(3), 16)
+        },
+        0xFB => { //EI
+            enableInterrupts();
+            (cpu.PC.wrapping_add(1), 4)
+        },
+        //No FC
+        //No FD
+        //FE implemented above
         0xFF => restart!(0x38), //RST 38H
 
         _ => { //TODO:will act as a NOP for now
