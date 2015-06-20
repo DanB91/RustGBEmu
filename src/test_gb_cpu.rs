@@ -373,7 +373,7 @@ fn rlca() { //0x7
     assert!(cpu.A == 0);
 
     assert!(!isFlagSet(Half, cpu.F));
-    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Zero, cpu.F));
     assert!(!isFlagSet(Neg, cpu.F));
     assert!(!isFlagSet(Carry, cpu.F));
 
@@ -667,7 +667,7 @@ fn rotateRight() { //0xF
     assert!(cpu.A == 0);
 
     assert!(!isFlagSet(Half, cpu.F));
-    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Zero, cpu.F));
     assert!(!isFlagSet(Neg, cpu.F));
     assert!(!isFlagSet(Carry, cpu.F));
 
@@ -731,7 +731,14 @@ fn rotateLeftThroughCarry() { //0x17
             assert!(cpu.A == $expectedVal);
 
             assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
+            
+            if $expectedVal == 0 {
+                assert!(isFlagSet(Zero, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Zero, cpu.F));
+            }
+
             assert!(!isFlagSet(Neg, cpu.F));
 
             if $isCSet {
@@ -854,7 +861,14 @@ fn rotateRightThroughCarry() { //0x1F
             assert!(cpu.A == $expectedVal);
 
             assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
+
+            if $expectedVal == 0 {
+                assert!(isFlagSet(Zero, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Zero, cpu.F));
+            }
+            
             assert!(!isFlagSet(Neg, cpu.F));
 
             if $isCSet {
@@ -3517,4 +3531,537 @@ fn loadMemIntoA() { //FA
 
 fn enableInterrupts() {
     //TODO: Test once interrupts are implemented
+}
+
+#[test]
+fn rotateLeftCB() { //0xCB00-0xCB07
+
+    macro_rules! testRLC {
+        ($reg:ident, $inst: expr) => ({
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+
+            writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
+
+            //test rotate 0
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(cpu.$reg == 0);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            assert!(isFlagSet(Zero, cpu.F));
+            assert!(!isFlagSet(Neg, cpu.F));
+            assert!(!isFlagSet(Carry, cpu.F));
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 8);
+
+            //test C set
+            cpu.$reg = 0x88;
+
+
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(cpu.$reg == 0x11);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            assert!(!isFlagSet(Zero, cpu.F));
+            assert!(!isFlagSet(Neg, cpu.F));
+            assert!(isFlagSet(Carry, cpu.F));
+
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 8);
+
+            //test C clear
+            cpu.$reg = 0x7F;
+
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(cpu.$reg == 0xFE);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            assert!(!isFlagSet(Zero, cpu.F));
+            assert!(!isFlagSet(Neg, cpu.F));
+            assert!(!isFlagSet(Carry, cpu.F));
+
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 8);
+
+        })
+    }
+
+    testRLC!(B, 0);
+    testRLC!(C, 1);
+    testRLC!(D, 2);
+    testRLC!(E, 3);
+    testRLC!(H, 4);
+    testRLC!(L, 5);
+    testRLC!(A, 7);
+
+}
+
+#[test]
+fn rotateLeftCBAtHL() {
+
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+
+    writeByteToMemory(&mut mem, 6, cpu.PC + 1);
+
+
+    //Byte at CCBB
+    cpu.H = 0xCC;
+    cpu.L = 0xBB;
+
+    //test rotate 0
+    let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+    assert_eq!(readByteFromMemory(&mut mem, 0xCCBB), 0);
+
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Zero, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+
+    assert!(newPC == cpu.PC + 2);
+    assert!(cyclesTaken == 16);
+
+    //test C set
+    writeByteToMemory(&mut mem, 0x88, 0xCCBB);
+
+
+    let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+    assert_eq!(readByteFromMemory(&mut mem, 0xCCBB), 0x11);
+
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+
+
+    assert!(newPC == cpu.PC + 2);
+    assert!(cyclesTaken == 16);
+
+    //test C clear
+    writeByteToMemory(&mut mem, 0x7F, 0xCCBB);
+
+    let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+    assert_eq!(readByteFromMemory(&mut mem, 0xCCBB), 0xFE);
+
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+
+    assert!(newPC == cpu.PC + 2);
+    assert!(cyclesTaken == 16);
+}
+
+#[test]
+fn rotateRightCB() { //CB08 - CB0D and CB0F
+
+    macro_rules! testRRC {
+        ($reg:ident, $inst: expr) => ({
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+
+            writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
+            //test rotate 0
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(cpu.$reg == 0);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            assert!(isFlagSet(Zero, cpu.F));
+            assert!(!isFlagSet(Neg, cpu.F));
+            assert!(!isFlagSet(Carry, cpu.F));
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 8);
+
+            //test C set
+            cpu.$reg = 0x11;
+
+
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(cpu.$reg == 0x88);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            assert!(!isFlagSet(Zero, cpu.F));
+            assert!(!isFlagSet(Neg, cpu.F));
+            assert!(isFlagSet(Carry, cpu.F));
+
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 8);
+
+            //test C clear
+            cpu.$reg = 0x76;
+
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(cpu.$reg == 0x3B);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            assert!(!isFlagSet(Zero, cpu.F));
+            assert!(!isFlagSet(Neg, cpu.F));
+            assert!(!isFlagSet(Carry, cpu.F));
+
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 8);
+
+        })
+    }
+
+    testRRC!(B, 8);
+    testRRC!(C, 9);
+    testRRC!(D, 0xA);
+    testRRC!(E, 0xB);
+    testRRC!(H, 0xC);
+    testRRC!(L, 0xD);
+    testRRC!(A, 0xF);
+}
+
+
+
+#[test]
+fn rotateRightCBAtHL() {//E
+
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+
+    writeByteToMemory(&mut mem, 0xE, cpu.PC + 1);
+
+
+    //Byte at CCBB
+    cpu.H = 0xCC;
+    cpu.L = 0xBB;
+
+    //test rotate 0
+    let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+    assert_eq!(readByteFromMemory(&mut mem, 0xCCBB), 0);
+
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Zero, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+
+    assert!(newPC == cpu.PC + 2);
+    assert!(cyclesTaken == 16);
+
+    //test C set
+    writeByteToMemory(&mut mem, 0x11, 0xCCBB);
+
+
+    let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+    assert_eq!(readByteFromMemory(&mut mem, 0xCCBB), 0x88);
+
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+
+
+    assert!(newPC == cpu.PC + 2);
+    assert!(cyclesTaken == 16);
+
+    //test C clear
+    writeByteToMemory(&mut mem, 0x76, 0xCCBB);
+
+    let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+    assert_eq!(readByteFromMemory(&mut mem, 0xCCBB), 0x3B);
+
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(!isFlagSet(Neg, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+
+    assert!(newPC == cpu.PC + 2);
+    assert!(cyclesTaken == 16);
+}
+
+#[test]
+fn rotateLeftThroughCarryCB() { //CB10 - CB15 and CB17
+
+    macro_rules! testRLA {
+        ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr, $reg:ident, $inst:expr) => ({
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+            writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
+
+            cpu.$reg = $regAVal;
+
+            if $setC {
+                setFlag(Carry, &mut cpu.F);
+            }
+
+            //test rotate 0
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(cpu.$reg == $expectedVal);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            
+            if $expectedVal == 0 {
+                assert!(isFlagSet(Zero, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Zero, cpu.F));
+            }
+
+            assert!(!isFlagSet(Neg, cpu.F));
+
+            if $isCSet {
+                assert!(isFlagSet(Carry, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Carry, cpu.F));
+            }
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 8);
+
+
+        })
+    }
+
+    macro_rules! runTestCases {
+        ($reg: ident, $inst:expr) => ({
+
+            //test rotate 0
+            testRLA!(0, 0, false, false, $reg, $inst);
+
+            //test C will be set
+            testRLA!(0x88, 0x10, false, true, $reg, $inst);
+
+            //test C clear
+            testRLA!(0x7F, 0xFE, false, false, $reg, $inst);
+
+            //test with C already set
+            testRLA!(0x80, 0x1, true, true, $reg, $inst);
+        })
+    }
+
+    runTestCases!(B, 0x10);
+    runTestCases!(C, 0x11);
+    runTestCases!(D, 0x12);
+    runTestCases!(E, 0x13);
+    runTestCases!(H, 0x14);
+    runTestCases!(L, 0x15);
+    runTestCases!(A, 0x17);
+
+}
+#[test]
+fn rotateLeftThroughCarryAtHLCB() { //CB16
+    macro_rules! testRLA {
+        ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr) => ({
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+            writeByteToMemory(&mut mem, 0x16, cpu.PC+1);
+            writeByteToMemory(&mut mem, $regAVal, 0xCCBB);
+
+
+            cpu.H = 0xCC;
+            cpu.L = 0xBB;
+
+            if $setC {
+                setFlag(Carry, &mut cpu.F);
+            }
+
+            //test rotate 0
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(readByteFromMemory(&mut mem, 0xCCBB) == $expectedVal);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            
+            if $expectedVal == 0 {
+                assert!(isFlagSet(Zero, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Zero, cpu.F));
+            }
+
+            assert!(!isFlagSet(Neg, cpu.F));
+
+            if $isCSet {
+                assert!(isFlagSet(Carry, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Carry, cpu.F));
+            }
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 16);
+
+
+        })
+    }
+
+
+    //test rotate 0
+    testRLA!(0, 0, false, false);
+
+    //test C will be set
+    testRLA!(0x88, 0x10, false, true);
+
+    //test C clear
+    testRLA!(0x7F, 0xFE, false, false);
+
+    //test with C already set
+    testRLA!(0x80, 0x1, true, true);
+
+
+}
+
+#[test]
+fn rotateRightThroughCarryCB() { //CB18 - CB1D and CB1F
+
+    macro_rules! testRR {
+        ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr, $reg:ident, $inst:expr) => ({
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+            writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
+
+            cpu.$reg = $regAVal;
+
+            if $setC {
+                setFlag(Carry, &mut cpu.F);
+            }
+
+            //test rotate 0
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(cpu.$reg == $expectedVal);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            
+            if $expectedVal == 0 {
+                assert!(isFlagSet(Zero, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Zero, cpu.F));
+            }
+
+            assert!(!isFlagSet(Neg, cpu.F));
+
+            if $isCSet {
+                assert!(isFlagSet(Carry, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Carry, cpu.F));
+            }
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 8);
+
+
+        })
+    }
+
+    macro_rules! runTestCases {
+        ($reg: ident, $inst:expr) => ({
+
+            //test rotate 0
+            testRR!(0, 0, false, false, $reg, $inst);
+
+            //test C will be set
+            testRR!(0x11, 0x8, false, true, $reg, $inst);
+
+            //test C clear
+            testRR!(0x88, 0x44, false, false, $reg, $inst);
+
+            //test with C already set
+            testRR!(0x81, 0xC0, true, true, $reg, $inst);
+        })
+    }
+
+    runTestCases!(B, 0x18);
+    runTestCases!(C, 0x19);
+    runTestCases!(D, 0x1A);
+    runTestCases!(E, 0x1B);
+    runTestCases!(H, 0x1C);
+    runTestCases!(L, 0x1D);
+    runTestCases!(A, 0x1F);
+
+}
+
+#[test]
+fn rotateRightThroughCarryAtHLCB() { //CB1E
+    macro_rules! testRR {
+        ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr) => ({
+            let mut cpu = testingCPU();
+            let mut mem = tetrisMemoryState();
+
+            writeByteToMemory(&mut mem, 0x1E, cpu.PC+1);
+            writeByteToMemory(&mut mem, $regAVal, 0xCCBB);
+
+
+            cpu.H = 0xCC;
+            cpu.L = 0xBB;
+
+            if $setC {
+                setFlag(Carry, &mut cpu.F);
+            }
+
+            //test rotate 0
+            let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+
+            assert!(readByteFromMemory(&mut mem, 0xCCBB) == $expectedVal);
+
+            assert!(!isFlagSet(Half, cpu.F));
+            
+            if $expectedVal == 0 {
+                assert!(isFlagSet(Zero, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Zero, cpu.F));
+            }
+
+            assert!(!isFlagSet(Neg, cpu.F));
+
+            if $isCSet {
+                assert!(isFlagSet(Carry, cpu.F));
+            }
+            else {
+                assert!(!isFlagSet(Carry, cpu.F));
+            }
+
+            assert!(newPC == cpu.PC + 2);
+            assert!(cyclesTaken == 16);
+
+
+        })
+    }
+
+
+    //test rotate 0
+    testRR!(0, 0, false, false);
+
+    //test C will be set
+    testRR!(0x11, 0x8, false, true);
+
+    //test C clear
+    testRR!(0x88, 0x44, false, false);
+
+    //test with C already set
+    testRR!(0x81, 0xC0, true, true);
+
+
 }

@@ -120,6 +120,22 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         ($f:expr) => (setFlag($f, &mut cpu.F));
     }
 
+    /*
+     * Sets given flag if condition is met, else it is cleared
+     *
+     * NOTE: This macro was added later on, so not all code will use it now
+     */
+    macro_rules! setFlagIf {
+        ($f:expr, $condition: expr) => ({
+            if $condition {
+                setFlag!($f);
+            }
+            else {
+                clearFlag!($f);
+            }
+        })
+    }
+
     macro_rules! clearFlag {
         ($f:expr) => (clearFlag($f, &mut cpu.F));
     }
@@ -148,27 +164,9 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
                 sum = sum.wrapping_add(if isFlagSet!(Carry) {1} else {0});
             } 
 
-            if (sum & 0xFF) == 0 {
-                setFlag!(Zero);
-            }
-            else {
-                clearFlag!(Zero);
-            }
-
-            if (sum & 0x100) != 0 {
-                setFlag!(Carry);
-            }
-            else {
-                clearFlag!(Carry);
-            }
-
-
-            if (cpu.A ^ $src ^ (sum & 0xFF) as u8) & 0x10 != 0 {
-                setFlag!(Half);
-            }
-            else {
-                clearFlag!(Half);
-            }
+            setFlagIf!(Zero, sum & 0xFF == 0);
+            setFlagIf!(Carry, sum & 0x100 != 0);
+            setFlagIf!(Half, (cpu.A ^ $src ^ (sum & 0xFF) as u8) & 0x10 != 0);
 
             cpu.A = (sum & 0xFF) as u8;
         })
@@ -579,6 +577,118 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         })
     }
 
+    /*
+     * Used for instructions that rotate registers left.
+     * Sets appropriate flags
+     * Args:
+     *      toRotate: 8-bit value to rotate
+     *
+     * Example:
+     *      rotateLeft(cpu.A); //rotates A left
+     *      
+     */
+    macro_rules! rotateLeft {
+        ($toRotate: expr) => ({
+            clearFlag!(Neg);
+            clearFlag!(Half);
+
+            setFlagIf!(Carry, $toRotate & 0x80 != 0);
+
+            $toRotate = ($toRotate << 1) | ($toRotate >> 7);
+
+            setFlagIf!(Zero, $toRotate == 0);
+
+        })
+
+    }
+
+    /*
+     * Used for instructions that rotate registers right.
+     * Sets appropriate flags
+     * Args:
+     *      toRotate: 8-bit value to rotate
+     *
+     * Example:
+     *      rotateRight!(cpu.A); //rotates A right
+     *      
+     */
+    macro_rules! rotateRight {
+        ($toRotate: expr) => ({
+
+        clearFlag!(Neg);
+        clearFlag!(Half);
+
+        setFlagIf!(Carry, $toRotate & 0x1 != 0);
+
+        $toRotate = ($toRotate >> 1) | ($toRotate << 7);
+
+        setFlagIf!(Zero, $toRotate == 0);
+        })
+
+    }
+
+    /*
+     * Used for instructions that rotate registers left through carry.
+     * Sets appropriate flags
+     * Args:
+     *      toRotate: 8-bit value to rotate
+     *
+     * Example:
+     *      rotateLeftThroughCarry!(cpu.A); //rotates A left
+     *      
+     */
+    macro_rules! rotateLeftThroughCarry {
+
+        ($toRotate: expr) => ({
+            clearFlag!(Neg);
+            clearFlag!(Half);
+
+            let temp = if isFlagSet!(Carry) {
+                $toRotate << 1 | 1
+            }
+            else {
+                $toRotate << 1
+            };
+
+            setFlagIf!(Carry, $toRotate & 0x80 != 0);
+            setFlagIf!(Zero, $toRotate == 0);
+
+            $toRotate = temp;
+        })
+    }
+
+
+    /*
+     * Used for instructions that rotate registers right through carry.
+     * Sets appropriate flags
+     * Args:
+     *      toRotate: 8-bit value to rotate
+     *
+     * Example:
+     *      rotateRightThroughCarry!(cpu.A); //rotates A right
+     *      
+     */
+    macro_rules! rotateRightThroughCarry {
+
+        ($toRotate: expr) => ({
+            clearFlag!(Neg);
+            clearFlag!(Half);
+
+            let temp = if isFlagSet!(Carry) {
+                $toRotate >> 1 | 0x80
+            }
+            else {
+                $toRotate >> 1
+            };
+
+            setFlagIf!(Carry, $toRotate & 0x1 != 0);
+            setFlagIf!(Zero, $toRotate == 0);
+
+            $toRotate = temp;
+        })
+    }
+    
+
     match instruction {
         0x0 => { //NOP
             (cpu.PC.wrapping_add(1),4)
@@ -608,18 +718,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
 
         0x7 => { //RLCA
-
-            clearFlag!(Zero);
-            clearFlag!(Neg);
-            clearFlag!(Half);
-
-            match cpu.A & 0x80 {
-                0 => clearFlag!(Carry),
-                _ => setFlag!(Carry)
-            }
-
-            cpu.A = (cpu.A << 1) | (cpu.A >> 7);
-
+            rotateLeft!(cpu.A);
             (cpu.PC.wrapping_add(1), 4)
         },
 
@@ -659,17 +758,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
 
         0xF => { //RRCA
-            clearFlag!(Zero);
-            clearFlag!(Neg);
-            clearFlag!(Half);
-
-            match cpu.A & 0x1 {
-                0 => clearFlag!(Carry),
-                _ => setFlag!(Carry)
-            }
-
-            cpu.A = (cpu.A >> 1) | (cpu.A << 7);
-
+            rotateRight!(cpu.A);
             (cpu.PC.wrapping_add(1), 4)
         },
 
@@ -707,26 +796,8 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
 
         0x17 => { //RLA
-            clearFlag!(Zero);
-            clearFlag!(Neg);
-            clearFlag!(Half);
-
-            let temp = if isFlagSet!(Carry) {
-                cpu.A << 1 | 1
-            }
-            else {
-                cpu.A << 1
-            };
-
-            match cpu.A & 0x80 {
-                0 => clearFlag!(Carry),
-                _ => setFlag!(Carry)
-            }
-
-            cpu.A = temp;
-
+            rotateLeftThroughCarry!(cpu.A);
             (cpu.PC.wrapping_add(1), 4)
-
         },
 
         0x18 => { //JR s8 
@@ -761,25 +832,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         },
 
         0x1F => { //RRA
-
-            clearFlag!(Zero);
-            clearFlag!(Neg);
-            clearFlag!(Half);
-
-            let temp = if isFlagSet!(Carry) {
-                cpu.A >> 1 | 0x80
-            }
-            else {
-                cpu.A >> 1
-            };
-
-            match cpu.A & 0x1 {
-                0 => clearFlag!(Carry),
-                _ => setFlag!(Carry)
-            }
-
-            cpu.A = temp;
-
+            rotateRightThroughCarry!(cpu.A);
             (cpu.PC.wrapping_add(1), 4)
 
         },
@@ -1222,8 +1275,53 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         0xC9 => (popOffOfStack(mem, &mut cpu.SP), 16), //RET
         0xCA => jumpAbsolute!(isFlagSet!(Zero)), //JP Z, a16
         0xCB => {
-            (cpu.PC.wrapping_add(1), 4)
-            //TODO CB instructions, NOP for now
+
+            //instruction to execute
+            let inst = readByteFromMemory(mem, cpu.PC.wrapping_add(1));
+
+
+            //load
+            let mut src = match (inst & 0xF) % 8 {
+                0 => cpu.B,
+                1 => cpu.C,
+                2 => cpu.D,
+                3 => cpu.E,
+                4 => cpu.H,
+                5 => cpu.L,
+                6 => readByteFromMemory(mem, word(cpu.H, cpu.L)),
+                7 => cpu.A,
+                _ => panic!("Unreachable.  Modding 8 should only yield values 0 to 7")
+            };
+
+            //manipulate
+            match inst {
+                0...7 => rotateLeft!(src), //RLC
+                0x8...0xF => rotateRight!(src), //RRC
+                0x10...0x17 => rotateLeftThroughCarry!(src), //RL
+                0x18...0x1F => rotateRightThroughCarry!(src), //RR
+                _ => {}
+            }
+
+            //save
+            match (inst & 0xF) % 8 {
+                0 => cpu.B = src,
+                1 => cpu.C = src,
+                2 => cpu.D = src,
+                3 => cpu.E = src,
+                4 => cpu.H = src,
+                5 => cpu.L = src,
+                6 => writeByteToMemory(mem, src, word(cpu.H, cpu.L)),
+                7 => cpu.A = src,
+                _ => panic!("Unreachable.  Modding 8 should only yield values 0 to 7")
+            }
+
+           
+            //8 cycles normally, but 16 cycles for (HL)
+            match (inst & 0xF) % 8 {
+                0...5 | 7 => (cpu.PC.wrapping_add(2), 8),
+                6 => (cpu.PC.wrapping_add(2), 16),
+                _ => panic!("Unreachable.  Modding 8 should only yield values 0 to 7")
+            }
         }
         0xCC => callProc!(isFlagSet!(Zero)), //CALL Z, a16
         0xCD => callProc!(true), //CALL a16
@@ -1331,11 +1429,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         //No FD
         //FE implemented above
         0xFF => restart!(0x38), //RST 38H
-
-        _ => { //TODO:will act as a NOP for now
-            (cpu.PC.wrapping_add(1), 4)
-        },
-        
+        _ => panic!("Illegal instruction")
 
     }
 }
