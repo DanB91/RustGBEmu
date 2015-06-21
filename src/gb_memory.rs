@@ -16,7 +16,7 @@ pub fn word(high: u8, low: u8) -> u16 {
 
 pub struct MemoryState {
     pub workingRAM: [u8;0x2000],
-    pub zeroPageRAM: [u8;0x80],
+    pub zeroPageRAM: [u8;0x7F],
     pub romData: Vec<u8>,
     pub inBios: bool
 }
@@ -24,7 +24,7 @@ impl MemoryState {
     pub fn new() -> MemoryState {
         MemoryState {
             workingRAM: [0;0x2000],
-            zeroPageRAM: [0;0x80],
+            zeroPageRAM: [0;0x7F],
             romData: vec![],
             inBios: true
         }
@@ -66,7 +66,9 @@ pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
 
         0xC000...0xDFFF =>
             memory.workingRAM[i - 0xC000],
-        0xFF80...0xFFFF =>
+        0xE000...0xFDFF => //echo of internal RAM
+            memory.workingRAM[i - 0xE000],
+        0xFF80...0xFFFE =>
             memory.zeroPageRAM[i - 0xFF80],
         _ => 0
     }
@@ -77,7 +79,8 @@ pub fn writeByteToMemory(memory: &mut MemoryState, byte: u8, addr: u16) {
     let i = addr as usize;
     match addr {
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
-        0xFF80...0xFFFF => memory.zeroPageRAM[i - 0xFF80] = byte,     
+        0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
+        0xFF80...0xFFFE => memory.zeroPageRAM[i - 0xFF80] = byte,     
         _ => {}
     }
 }
@@ -134,10 +137,16 @@ mod tests {
         assert!(readByteFromMemory(&memory,0xDFFF) ==
                 memory.workingRAM[memory.workingRAM.len()-1]);
         assert!(readByteFromMemory(&memory,0xDFFF) == 0xAA); //reading from working ram
-        
+
+
+        writeByteToMemory(&mut memory,0xAA, 0xE000) ; //test echo ram
+        assert!(readByteFromMemory(&memory,0xC000) == 0xAA); //reading from working ram
+        assert!(readByteFromMemory(&memory,0xE000) == 0xAA); //reading from working ram
+       
+
         writeByteToMemory(&mut memory,0xAA, 0xFF90) ; //writing to zero page ram
         assert!(readByteFromMemory(&memory,0xDFFF) ==
-                memory.workingRAM[memory.workingRAM.len()-1]);
+                memory.zeroPageRAM[0x10]);
         assert!(readByteFromMemory(&memory,0xFF90) == 0xAA); //reading from zero page ram
     }
 
@@ -167,10 +176,8 @@ mod tests {
                 word(memory.workingRAM[memory.workingRAM.len()-1],memory.workingRAM[memory.workingRAM.len()-2]));
         assert!(readWordFromMemory(&memory,0xDFFE) == 0xAAFF); //reading from working ram
         
-        writeWordToMemory(&mut memory,0xAAFF, 0xFFFE); //writing to zero page ram
-        assert!(readWordFromMemory(&memory,0xDFFE) ==
-                word(memory.workingRAM[memory.workingRAM.len()-1],memory.workingRAM[memory.workingRAM.len()-2]));
-        assert!(readWordFromMemory(&memory,0xFFFE) == 0xAAFF); //reading from zero page ram
+        writeWordToMemory(&mut memory,0xAAFF, 0xFFFD); //writing to zero page ram
+        assert!(readWordFromMemory(&memory,0xFFFD) == 0xAAFF); //reading from zero page ram
     }
 }
 

@@ -394,7 +394,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             //whether or not to do the actual jump
             if $condition {
                 let offset = readByteFromMemory(&mem, cpu.PC.wrapping_add(1)) as i8;
-                (((cpu.PC as i16).wrapping_add(offset as i16)) as u16, 12)
+                (((cpu.PC as i16).wrapping_add(offset as i16)).wrapping_add(2) as u16, 12)
             }
             else {
                 (cpu.PC.wrapping_add(2), 8)

@@ -29,6 +29,30 @@ fn getROMFileName() -> Result<String, &'static str> {
     retStr
 }
 
+fn disassemble(cpu: &CPUState, mem: &MemoryState) -> String {
+    let instruction = readByteFromMemory(mem, cpu.PC);
+
+    macro_rules! nextByte {
+        () => (readByteFromMemory(mem, cpu.PC.wrapping_add(1)))
+    }
+
+    macro_rules! nextWord {
+        () => (readWordFromMemory(mem, cpu.PC.wrapping_add(1)))
+    }
+    match instruction {
+        0 => format!("NOP"),
+        1 => format!("LD BC ${:X}", nextWord!()),
+        2 => format!("LD (BC) A"),
+        3 => format!("INC BC"),
+        4 => format!("INC B"),
+        5 => format!("DEC B"),
+        6 => format!("LD B ${:X}", nextByte!()),
+
+        0x20 => format!("JR NZ {}", nextByte!() as i8),
+        _ => format!("")
+    }
+
+}
 
 fn main() {
 
@@ -40,9 +64,6 @@ fn main() {
             return
         }
     };
-
-    let mut totalCycles = 0u32; //total cycles since game has been loaded
-    let mut instructionCycles = 0u32; //number of cycles in a given instruction
 
     let mut cpu = CPUState::new();
 
@@ -57,42 +78,33 @@ fn main() {
 
     let mut stdin = io::stdin();
     let mut line = String::new();
-    
+
     //step one instruction every time you hit enter
     loop {
+        let mut instructionToPrint = readByteFromMemory(&mem, cpu.PC) as u16;
 
-        match stdin.read_line(&mut line) {
-            Ok(_) => {}
-            Err(_) => {
-                break;
-            }
+        if instructionToPrint == 0xCB {
+            instructionToPrint =  word(0xCBu8, readByteFromMemory(&mem, cpu.PC.wrapping_add(1)))
         }
-        let instructionToExecute = readByteFromMemory(&mem, cpu.PC);
-        println!("Current Insruction: {:X}", instructionToExecute);
-        println!("Total Cycles: {}, Cycles just executed: {}", totalCycles, instructionCycles);
+
+        println!("Current Insruction: {}\tOpcode:{:X}", disassemble(&cpu, &mem), instructionToPrint);
+        println!("Total Cycles: {}, Cycles just executed: {}", cpu.totalCycles, cpu.instructionCycles);
         println!("Currently in BIOS: {}", mem.inBios);
         println!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, cpu.F), isFlagSet(Flag::Neg, cpu.F), isFlagSet(Flag::Half, cpu.F), isFlagSet(Flag::Carry, cpu.F));
         println!("PC: {:X}\tSP: {:X}", cpu.PC, cpu.SP);
         println!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", cpu.A, cpu.F, cpu.B, cpu.C);
         println!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", cpu.D, cpu.E, cpu.H, cpu.L);
 
-
-        if cpu.PC > 0xFF {
-            mem.inBios = false;
+        match stdin.read_line(&mut line) {
+            Ok(_) => {step(&mut cpu, &mut mem);}
+            Err(_) => {
+                break;
+            }
         }
 
-        let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, &mut cpu, &mut mem); 
-        cpu.PC = newPC;
-        instructionCycles = cyclesTaken;
-
-        totalCycles += instructionCycles;
 
     }
 
 }
-
-
-
-
 
 

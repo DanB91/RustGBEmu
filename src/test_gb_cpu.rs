@@ -784,7 +784,7 @@ fn jumpRelative() { //0x18
 
         let (newPC, cyclesTaken) = executeInstruction(0x18, &mut cpu, &mut mem);
 
-        assert!(newPC  == (cpu.PC as i16 + sOffset as i16 ) as u16);
+        assert!(newPC  == (cpu.PC as i16 + sOffset as i16 + 2 ) as u16);
         assert!(cyclesTaken == 12);
 
     }
@@ -813,7 +813,7 @@ fn jumpRelativeWithCondition() { //0x20
 
         let (newPC, cyclesTaken) = executeInstruction(inst, &mut cpu, &mut mem);
 
-        assert!(newPC  == (cpu.PC as i16 - 128) as u16);
+        assert!(newPC  == (cpu.PC as i16 - 128 )  as u16 + 2);
         assert!(cyclesTaken == 12);
 
         //should not perform jump
