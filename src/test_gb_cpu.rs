@@ -4065,3 +4065,362 @@ fn rotateRightThroughCarryAtHLCB() { //CB1E
 
 
 }
+
+
+//tests all CB instructions except rotate instructions
+//TODO: Perhaps merge rotate instructions into here....
+#[test]
+fn cbInstructions() {
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryState();
+
+
+    //inner scope for macros to work
+    {
+        macro_rules! storeValue {
+            ($value: expr, $inst: expr) => ({
+                match $inst  % 8  {
+                    0 => cpu.B = $value,
+                    1 => cpu.C = $value,
+                    2 => cpu.D = $value,
+                    3 => cpu.E = $value,
+                    4 => cpu.H = $value,
+                    5 => cpu.L = $value,
+                    // we will be using address 0xCCBB to store (HL) values
+                    6 =>{
+                        cpu.H = 0xCC;
+                        cpu.L = 0xBB;
+                        writeByteToMemory(&mut mem, $value, 0xCCBB);
+                    },    
+                    7 => cpu.A = $value,
+                    _ => panic!("Unreachable")
+                }
+            })
+        }
+
+        macro_rules! testValue {
+            ($value: expr, $inst: expr) => ({
+                let toTest = match $inst % 8  {
+                    0 => cpu.B,
+                    1 => cpu.C,
+                    2 => cpu.D,
+                    3 => cpu.E,
+                    4 => cpu.H,
+                    5 => cpu.L,
+                    // we will be using address 0xCCBB to store (HL) values
+                    6 => readByteFromMemory(&mut mem, 0xCCBB),
+                    7 => cpu.A,
+                    _ => panic!("Unreachable")
+                
+                };
+
+
+                assert_eq!(toTest, $value);
+                println!("Testing value: {:X} passed!", $value);
+            })
+        }
+
+        macro_rules! testCyclesTaken {
+            ($value: expr, $inst: expr) => ({
+                if ($inst & 0xF) % 8 == 6 {
+                    assert_eq!($value, 16);
+                }
+                else {
+                    assert_eq!($value, 8);
+                }
+                println!("Cycles taken test passed!");
+            })
+
+        }
+
+
+        for i in 0x20..0xFF {
+            println!("Testing Instruction: {:X}", i); 
+            writeByteToMemory(&mut mem, i, cpu.PC + 1);
+            cpu.F = 0xF0; //set all flags
+
+            macro_rules! executeInstruction {
+                () => ({
+                    let (newPC, cyclesTaken) = executeInstruction(0xCB, &mut cpu, &mut mem);
+                    testCyclesTaken!(cyclesTaken, i);
+                    assert_eq!(newPC, cpu.PC + 2);
+
+                })
+            }
+
+            match i {
+                0x20...0x27 => { //SLA
+
+                    //-------------------test case 1-----------------------------------------
+                    storeValue!(0x80, i);
+                    executeInstruction!();
+                    testValue!(0, i);
+
+                    //Z and C set
+                    assert!(isFlagSet(Zero, cpu.F));
+                    assert!(isFlagSet(Carry, cpu.F));
+                    assert!(!isFlagSet(Neg, cpu.F));
+                    assert!(!isFlagSet(Half, cpu.F));
+                    //----------------------------------------------------------------------
+
+
+                    //-------------------test case 2-----------------------------------------
+                    //0x11 shifted left is 0x22
+                    storeValue!(0x11, i);
+                    executeInstruction!();
+                    testValue!(0x22, i);
+                    //no flags set
+                    assert_eq!(0, cpu.F);
+                    //----------------------------------------------------------------------
+                }
+
+                0x28...0x2F => { //SRA
+
+                    //-------------------test case 1-----------------------------------------
+                    storeValue!(0x80, i);
+                    executeInstruction!();
+
+                    testValue!(0xC0, i); //propagated sign bit
+
+                    //no flags set
+                    assert_eq!(0, cpu.F);
+                    //----------------------------------------------------------------------
+                    
+                    
+                    //------------------test case 2----------------------------------------
+                    //0x1 shifted right is 0
+                    storeValue!(1, i);
+                    executeInstruction!();
+                    testValue!(0, i);
+                    //Z set
+                    assert!(isFlagSet(Zero, cpu.F));
+                    assert!(isFlagSet(Carry, cpu.F));
+                    assert!(!isFlagSet(Neg, cpu.F));
+                    assert!(!isFlagSet(Half, cpu.F));
+                    //--------------------------------------------------------------------
+
+                }
+
+                0x30...0x37 => { //SWAP
+                    //-------------------test case 1-----------------------------------------
+                    storeValue!(0x80, i);
+
+                    executeInstruction!();
+                    testValue!(0x08, i);
+
+                    //no flags set
+                    assert_eq!(0, cpu.F);
+                    //----------------------------------------------------------------------
+                   
+
+                    //-------------------test case 2-----------------------------------------
+                    storeValue!(0, i);
+
+                    executeInstruction!();
+                    testValue!(0, i);
+                    //Z set
+                    assert!(isFlagSet(Zero, cpu.F));
+                    assert!(!isFlagSet(Carry, cpu.F));
+                    assert!(!isFlagSet(Neg, cpu.F));
+                    assert!(!isFlagSet(Half, cpu.F));
+                    //----------------------------------------------------------------------
+
+                },
+
+                0x38...0x3F => { //SRL
+                    //-------------------test case 1-----------------------------------------
+                    storeValue!(0x80, i);
+                    executeInstruction!();
+
+                    testValue!(0x40, i); //don't propagate sign bit
+
+                    //no flags set
+                    assert_eq!(0, cpu.F);
+                    //----------------------------------------------------------------------
+                    
+                    
+                    //------------------test case 2----------------------------------------
+                    //0x1 shifted right is 0
+                    storeValue!(1, i);
+                    executeInstruction!();
+                    testValue!(0, i);
+                    //Z set
+                    assert!(isFlagSet(Zero, cpu.F));
+                    assert!(isFlagSet(Carry, cpu.F));
+                    assert!(!isFlagSet(Neg, cpu.F));
+                    assert!(!isFlagSet(Half, cpu.F));
+                    //--------------------------------------------------------------------
+
+                }
+                0x40...0x7F => { //BIT
+                    macro_rules! testBit {
+                        ($value: expr, $shouldZeroBeSet: expr)=>  ({
+                            storeValue!($value, i);
+                            executeInstruction!();
+
+                            assert!(!isFlagSet(Neg, cpu.F));
+                            assert!(isFlagSet(Half, cpu.F));
+
+                            if $shouldZeroBeSet {
+                                assert!(isFlagSet(Zero, cpu.F));
+                            }
+                            else {
+                                assert!(!isFlagSet(Zero, cpu.F));
+                            }
+
+                        })
+                    }
+                    match i {
+
+                        0x40...0x47 => {//BIT 0
+                            testBit!(0x80, true);
+                            testBit!(0x81, false);
+                        }
+
+                        0x48...0x4F => {//BIT 1
+                            testBit!(0x81, true);
+                            testBit!(0x83, false);
+                        }
+                        
+                        0x50...0x57 => {//BIT 2
+                            testBit!(0x83, true);
+                            testBit!(0x87, false);
+                        }
+                        
+                        0x58...0x5F => {//BIT 3
+                            testBit!(0x87, true);
+                            testBit!(0x8F, false);
+                        }
+
+                        0x60...0x67 => {//BIT 4
+                            testBit!(0x8F, true);
+                            testBit!(0x90, false);
+                        }
+
+                        0x68...0x6F => {//BIT 5
+                            testBit!(0x90, true);
+                            testBit!(0x20, false);
+                        }
+                        
+                        0x70...0x77 => {//BIT 6
+                            testBit!(0x20, true);
+                            testBit!(0x40, false);
+                        }
+                        
+                        0x78...0x7F => {//BIT 7
+                            testBit!(0x40, true);
+                            testBit!(0x80, false);
+                        }
+
+
+                        _ => {}
+                    }
+                }
+
+                0x80...0xBF => { //RES
+                    macro_rules! testResetBit {
+                        ($initialVal: expr, $result: expr)=>  ({
+                            storeValue!($initialVal, i);
+                            executeInstruction!();
+
+                            testValue!($result, i);
+
+                        })
+                    }
+                    match i {
+
+                        0x80...0x87 => {//RES 0
+                            testResetBit!(0xFF, 0xFE);
+                        }
+
+                        0x88...0x8F => {//RES 1
+                            testResetBit!(0xF3, 0xF1);
+                        }
+                        
+                        0x90...0x97 => {//RES 2
+                            testResetBit!(0x44, 0x40);
+                        }
+                        
+                        0x98...0x9F => {//RES 3
+                            testResetBit!(0x4C, 0x44);
+                        }
+
+                        0xA0...0xA7 => {//RES 4
+                            testResetBit!(0x1C, 0xC);
+                        }
+
+                        0xA8...0xAF => {//RES 5
+                            testResetBit!(0x2C, 0xC);
+                        }
+                        
+                        0xB0...0xB7 => {//RES 6
+                            testResetBit!(0x4C, 0xC);
+                        }
+                        
+                        0xB8...0xBF => {//RES 7
+                            testResetBit!(0xFC, 0x7C);
+                        }
+
+
+                        _ => {}
+                    }
+                }
+                
+                0xC0...0xFF => { //SET
+                    macro_rules! testSetBit {
+                        ($initialVal: expr, $result: expr)=>  ({
+                            storeValue!($initialVal, i);
+                            executeInstruction!();
+
+                            testValue!($result, i);
+
+                        })
+                    }
+                    match i {
+
+                        0xC0...0xC7 => {//SET 0
+                            testSetBit!(0, 1);
+                        }
+
+                        0xC8...0xCF => {//SET 1
+                            testSetBit!(4, 6);
+                        }
+                        
+                        0xD0...0xD7 => {//SET 2
+                            testSetBit!(4, 4);
+                        }
+                        
+                        0xD8...0xDF => {//SET 3
+                            testSetBit!(0x7, 0xF);
+                        }
+
+                        0xE0...0xE7 => {//SET 4
+                            testSetBit!(0, 0x10);
+                        }
+
+                        0xE8...0xEF => {//SET 5
+                            testSetBit!(0, 0x20);
+                        }
+                        
+                        0xF0...0xF7 => {//SET 6
+                            testSetBit!(0, 0x40);
+                        }
+                        
+                        0xF8...0xFF => {//SET 7
+                            testSetBit!(0, 0x80);
+                        }
+
+
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        
+    }
+
+}
+
+

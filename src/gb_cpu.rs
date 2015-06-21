@@ -1274,14 +1274,17 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         0xC8 => returnFromProc!(isFlagSet!(Zero)), //RET Z 
         0xC9 => (popOffOfStack(mem, &mut cpu.SP), 16), //RET
         0xCA => jumpAbsolute!(isFlagSet!(Zero)), //JP Z, a16
-        0xCB => {
+        0xCB => {//CB prefixed instructions
+
+            //TODO: Email pastraiser.  There seemse to be a discrepency between
+            //pastraiser and marc rawer manuals.  SRA should set Carry and RLCA should set Zero 
 
             //instruction to execute
             let inst = readByteFromMemory(mem, cpu.PC.wrapping_add(1));
 
 
             //load
-            let mut src = match (inst & 0xF) % 8 {
+            let mut src = match inst % 8 {
                 0 => cpu.B,
                 1 => cpu.C,
                 2 => cpu.D,
@@ -1299,11 +1302,82 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
                 0x8...0xF => rotateRight!(src), //RRC
                 0x10...0x17 => rotateLeftThroughCarry!(src), //RL
                 0x18...0x1F => rotateRightThroughCarry!(src), //RR
-                _ => {}
+
+                0x20...0x27 => { //SLA
+                    clearFlag!(Half);
+                    clearFlag!(Neg);
+                    
+                    //store high bit in carry
+                    setFlagIf!(Carry, (src & 0x80) != 0); 
+
+                    src <<= 1;
+
+                    setFlagIf!(Zero, src == 0);
+                }
+                
+                0x28...0x2F => { //SRA
+                    clearFlag!(Half);
+                    clearFlag!(Neg);
+                    
+                    //store low bit in carry
+                    setFlagIf!(Carry, (src & 1) != 0); 
+
+                    //propagate sign bit
+                    src = ((src as i8) >> 1) as u8;
+
+                    setFlagIf!(Zero, src == 0);
+                }
+
+                0x30...0x37 => {//SWAP 
+                    clearFlag!(Neg);
+                    clearFlag!(Carry);
+                    clearFlag!(Half);
+
+                    src = (src << 4) | (src >> 4);
+                    setFlagIf!(Zero, src == 0);
+                }
+
+                0x38...0x3F => { //SRL
+                    clearFlag!(Half);
+                    clearFlag!(Neg);
+                    
+                    //store low bit in carry
+                    setFlagIf!(Carry, (src & 1) != 0); 
+
+                    //don't propagate sign bit
+                    src >>= 1;
+
+                    setFlagIf!(Zero, src == 0);
+
+                },
+
+                0x40...0x7F => { //BIT
+                    setFlag!(Half);
+                    clearFlag!(Neg);
+
+                    //caclulate which bit to test
+                    let mask = 1 << ((inst - 0x40) / 8);
+
+                    setFlagIf!(Zero, (src & mask) == 0);
+
+                }
+
+                0x80...0xBF => { //RES
+                    //caclulate mask used to clear bit
+                    let mask = !(1 << ((inst - 0x80) / 8));
+                    src &= mask;
+                }
+                
+                0xC0...0xFF => { //SET
+                    //caclulate mask used to set bit
+                    let mask = 1 << ((inst - 0xC0) / 8);
+                    src |= mask;
+                }
+                _ => panic!("Unreachable.  Max value is 0xFF")
             }
 
             //save
-            match (inst & 0xF) % 8 {
+            match inst % 8 {
                 0 => cpu.B = src,
                 1 => cpu.C = src,
                 2 => cpu.D = src,
@@ -1317,7 +1391,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
            
             //8 cycles normally, but 16 cycles for (HL)
-            match (inst & 0xF) % 8 {
+            match inst % 8 {
                 0...5 | 7 => (cpu.PC.wrapping_add(2), 8),
                 6 => (cpu.PC.wrapping_add(2), 16),
                 _ => panic!("Unreachable.  Modding 8 should only yield values 0 to 7")
