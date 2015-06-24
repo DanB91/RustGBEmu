@@ -10,6 +10,14 @@ use gb_memory::*;
 mod gb_cpu;
 use gb_cpu::*;
 
+#[macro_use]
+extern crate bitflags;
+
+extern crate sdl2;
+extern crate libc;
+extern crate sdl2_sys;
+mod sdl2_ttf;
+use sdl2::pixels::Color;
 
 static USAGE: &'static str= "Usage: gbemu path_to_rom";
 
@@ -29,6 +37,7 @@ fn getROMFileName() -> Result<String, &'static str> {
     retStr
 }
 
+//TODO: finish disassembler
 fn disassemble(cpu: &CPUState, mem: &MemoryState) -> String {
     let instruction = readByteFromMemory(mem, cpu.PC);
 
@@ -40,15 +49,17 @@ fn disassemble(cpu: &CPUState, mem: &MemoryState) -> String {
         () => (readWordFromMemory(mem, cpu.PC.wrapping_add(1)))
     }
     match instruction {
-        0 => format!("NOP"),
-        1 => format!("LD BC ${:X}", nextWord!()),
-        2 => format!("LD (BC) A"),
-        3 => format!("INC BC"),
-        4 => format!("INC B"),
-        5 => format!("DEC B"),
-        6 => format!("LD B ${:X}", nextByte!()),
-
-        0x20 => format!("JR NZ {}", nextByte!() as i8),
+        0x0 => format!("NOP"),
+        0x1 => format!("LD BC ${:X}", nextWord!()),
+        0x2 => format!("LD (BC) A"),
+        0x3 => format!("INC BC"),
+        0x4 => format!("INC B"),
+        0x5 => format!("DEC B"),
+        0x6 => format!("LD B ${:X}", nextByte!()),
+        0x7 => format!("RLCA"),
+        0x8 => format!("LD (${:X}), SP", nextWord!()),
+        0x20 => format!("JR NZ Addr_{:X}", 
+                        (cpu.PC as i16).wrapping_add(nextByte!() as i8 as i16).wrapping_add(2)),
         _ => format!("")
     }
 
@@ -76,9 +87,32 @@ fn main() {
     let mut mem = MemoryState::new();
     mem.romData = romData;
 
+
+    //init SDL 
+    let mut sdlContext = sdl2::init().video().events().unwrap();
+
+    let window = sdlContext.window("GB Emu", 800, 600).position_centered().build().unwrap();
+    let mut renderer = window.renderer().build().unwrap();
+    renderer.clear();
+    renderer.present();
+
+    'gameBoyLoop: loop {
+        for event in sdlContext.event_pump().poll_iter() {
+            use sdl2::event::Event;
+
+            match event {
+                Event::Quit{..} => break 'gameBoyLoop,
+                _ => {}
+            }
+        }
+    }
+
+    //TODO(DanB): port this printing over to drawing to SDL screen
+    /*
     let mut stdin = io::stdin();
     let mut line = String::new();
 
+    
     //step one instruction every time you hit enter
     loop {
         let mut instructionToPrint = readByteFromMemory(&mem, cpu.PC) as u16;
@@ -104,6 +138,7 @@ fn main() {
 
 
     }
+    */
 
 }
 
