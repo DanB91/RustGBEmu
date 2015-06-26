@@ -115,9 +115,9 @@ fn main() {
     
 
 
+    let mut cyclesPerSec = 0f32;
     'gameBoyLoop: loop {
         let start = get_performance_counter();
-        let mut framesPerSec = 0f32;
 
         for event in sdlContext.event_pump().poll_iter() {
 
@@ -137,7 +137,7 @@ fn main() {
         let toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
                               format!("Current Insruction: {}\tOpcode:{:X}", disassemble(&cpu, &mem), instructionToPrint),
                               format!("Total Cycles: {}, Cycles just executed: {}", cpu.totalCycles, cpu.instructionCycles),
-                              format!("Frames per second {}", framesPerSec),
+                              format!("Cycles per second {}", cyclesPerSec),
                               format!("Currently in BIOS: {}", mem.inBios),
                               format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, cpu.F), isFlagSet(Flag::Neg, cpu.F), isFlagSet(Flag::Half, cpu.F), isFlagSet(Flag::Carry, cpu.F)),
                               format!("PC: {:X}\tSP: {:X}", cpu.PC, cpu.SP),
@@ -155,7 +155,7 @@ fn main() {
 
         step(&mut cpu, &mut mem);
 
-        framesPerSec = 1f32 / ((get_performance_counter() as f64 - start as f64) / get_performance_frequency() as f64) as f32;
+        cyclesPerSec = cpu.instructionCycles as f32 / ((get_performance_counter() as f64 - start as f64) / get_performance_frequency() as f64) as f32;
 
 
 
