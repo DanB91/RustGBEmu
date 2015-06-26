@@ -56,14 +56,14 @@ pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
 
     let i = addr as usize;
     match addr {
-        0...0x3FFF =>  
+        0...0xFF =>  
             if memory.inBios {
-                debug_assert!(i < 0x100);
                 bios[i]
             }  else {
                 memory.romData[i]
             },
-
+        0x100...0x3FFF =>  
+            memory.romData[i],
         0xC000...0xDFFF =>
             memory.workingRAM[i - 0xC000],
         0xE000...0xFDFF => //echo of internal RAM

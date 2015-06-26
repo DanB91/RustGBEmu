@@ -17,9 +17,23 @@ extern crate sdl2;
 extern crate libc;
 extern crate sdl2_sys;
 mod sdl2_ttf;
+
 use sdl2::pixels::Color;
+use sdl2::event::Event;
+use sdl2::timer::{get_performance_counter, get_performance_frequency};
+
+use std::path::Path;
 
 static USAGE: &'static str= "Usage: gbemu path_to_rom";
+static FONT_PATH_STR: &'static str = "res/Gamegirl.ttf";
+
+const SCREEN_WIDTH: u32 = 800;
+const SCREEN_HEIGHT: u32 = 600;
+
+// fail when error
+macro_rules! trying(
+    ($e:expr) => (match $e { Ok(e) => e, Err(e) => panic!("failed: {}", e) })
+);
 
 fn getROMFileName() -> Result<String, &'static str> {
 
@@ -65,6 +79,8 @@ fn disassemble(cpu: &CPUState, mem: &MemoryState) -> String {
 
 }
 
+
+
 fn main() {
 
     //parse cmd args
@@ -90,22 +106,62 @@ fn main() {
 
     //init SDL 
     let mut sdlContext = sdl2::init().video().events().unwrap();
+    sdl2_ttf::init().unwrap();
 
-    let window = sdlContext.window("GB Emu", 800, 600).position_centered().build().unwrap();
+    let window = sdlContext.window("GB Emu", SCREEN_WIDTH, SCREEN_HEIGHT).position_centered().build().unwrap();
     let mut renderer = window.renderer().build().unwrap();
-    renderer.clear();
-    renderer.present();
+    let font =  trying!(sdl2_ttf::Font::from_file(Path::new(FONT_PATH_STR), 14));
+
+    
+
 
     'gameBoyLoop: loop {
+        let start = get_performance_counter();
+        let mut framesPerSec = 0f32;
+
         for event in sdlContext.event_pump().poll_iter() {
-            use sdl2::event::Event;
 
             match event {
                 Event::Quit{..} => break 'gameBoyLoop,
                 _ => {}
-            }
+            }   
         }
+
+
+        let mut instructionToPrint = readByteFromMemory(&mem, cpu.PC) as u16;
+
+        if instructionToPrint == 0xCB {
+            instructionToPrint =  word(0xCBu8, readByteFromMemory(&mem, cpu.PC.wrapping_add(1)))
+        }
+
+        let toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
+                              format!("Current Insruction: {}\tOpcode:{:X}", disassemble(&cpu, &mem), instructionToPrint),
+                              format!("Total Cycles: {}, Cycles just executed: {}", cpu.totalCycles, cpu.instructionCycles),
+                              format!("Frames per second {}", framesPerSec),
+                              format!("Currently in BIOS: {}", mem.inBios),
+                              format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, cpu.F), isFlagSet(Flag::Neg, cpu.F), isFlagSet(Flag::Half, cpu.F), isFlagSet(Flag::Carry, cpu.F)),
+                              format!("PC: {:X}\tSP: {:X}", cpu.PC, cpu.SP),
+                              format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", cpu.A, cpu.F, cpu.B, cpu.C),
+                              format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", cpu.D, cpu.E, cpu.H, cpu.L));
+
+
+        let fontSurf =  trying!(font.render_str_blended_wrapped(&toPrint, Color::RGBA(255,255,255,255), SCREEN_WIDTH));
+        let mut fontTex = trying!(renderer.create_texture_from_surface(&fontSurf));
+
+        let (texW, texH) = { let q = fontTex.query(); (q.width, q.height)};
+        renderer.clear();
+        renderer.copy(&mut fontTex, None, sdl2::rect::Rect::new(0, texH as i32, texW, texH).unwrap());
+        renderer.present();
+
+        step(&mut cpu, &mut mem);
+
+        framesPerSec = 1f32 / ((get_performance_counter() as f64 - start as f64) / get_performance_frequency() as f64) as f32;
+
+
+
     }
+
+    sdl2_ttf::quit();
 
     //TODO(DanB): port this printing over to drawing to SDL screen
     /*
@@ -141,5 +197,6 @@ fn main() {
     */
 
 }
+
 
 

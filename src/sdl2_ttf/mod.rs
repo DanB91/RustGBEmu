@@ -4,7 +4,7 @@ A binding for SDL2_ttf.
 
 
 
-use libc::{c_int, c_long};
+use libc::{c_int, c_long, uint32_t};
 use std::ffi::{CString, CStr};
 use std::path::Path;
 use sdl2::surface::Surface;
@@ -81,13 +81,19 @@ pub fn get_linked_version() -> Version {
     }
 }
 
-pub fn init() -> bool {
+pub fn init() -> SdlResult<bool> {
     //! Initialize the truetype font API.
     unsafe {
         if ffi::TTF_WasInit() == 1 {
-            true
-        } else {
-            ffi::TTF_Init() == 0
+            Ok(true)
+        } 
+        else {
+            if ffi::TTF_Init() == 0 {
+                Ok(true)
+            }
+            else {
+                Err(format!("SDL TTF failed to init with error: {}", get_error()))
+            }
         }
     }
 }
@@ -348,6 +354,18 @@ impl Font {
         }
     }
 
+    pub fn render_str_blended_wrapped(&self, text: &str, fg: Color, wrap_length: u32) -> SdlResult<Surface>{
+        unsafe {    
+            let ctext = CString::new(text.as_bytes()).unwrap().as_ptr();
+            let raw = ffi::TTF_RenderUTF8_Blended_Wrapped(self.raw, ctext, color_to_c_color(fg), wrap_length as uint32_t);
+            if raw.is_null() {
+                Err(get_error())
+            } else {
+                Ok(Surface::from_ll(raw, true))
+            }
+        }
+
+    }
     pub fn render_bytes_solid(&self, text: &[u8], fg: Color) -> SdlResult<Surface> {
         //! Draw LATIN1 text in solid mode.
         unsafe {
