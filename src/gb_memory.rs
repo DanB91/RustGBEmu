@@ -21,6 +21,7 @@ pub struct MemoryState {
     pub inBios: bool
 }
 impl MemoryState {
+
     pub fn new() -> MemoryState {
         MemoryState {
             workingRAM: [0;0x2000],

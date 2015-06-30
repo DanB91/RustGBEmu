@@ -5,6 +5,8 @@
 
 use gb_memory::*;
 
+pub const CLOCK_SPEED_HZ: f32 = 4194304f32;
+
 pub struct CPUState {
     pub PC: u16,
     pub SP: u16,
@@ -1510,7 +1512,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 
 
 pub fn step(cpu: &mut CPUState, mem: &mut MemoryState) {
-    let instructionToExecute = readByteFromMemory(&mem, cpu.PC);
+    let instructionToExecute = readByteFromMemory(mem, cpu.PC);
     
     if cpu.PC > 0xFF {
         mem.inBios = false;
