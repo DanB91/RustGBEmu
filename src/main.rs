@@ -15,11 +15,7 @@ mod gb_gpu;
 mod sdl2_ttf;
 
 use std::env;
-//use std::io;
-use std::thread;
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
-use std::sync::mpsc::{sync_channel, SyncSender};
 
 use libc::funcs::posix88::unistd::usleep;
 use libc::consts::os::posix88::EINTR;
@@ -31,6 +27,7 @@ use gb_cpu::*;
 use gb_gpu::*;
 
 use sdl2::pixels::Color;
+//use sdl2::render::Renderer;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::timer::{get_performance_counter, get_performance_frequency};
@@ -46,22 +43,6 @@ const SCREEN_HEIGHT: u32 = 144 * GAMEBOY_SCALE;
 
 const SECONDS_PER_FRAME: f32 = 1f32/60f32;
 const CYCLES_PER_SLEEP: u32 = 60000;
-
-struct GameBoy {
-    pub cpu: CPUState,
-    pub mem: MemoryState,
-    pub gpu: GPUState
-}
-
-impl GameBoy {
-    fn new() -> GameBoy {
-        GameBoy {
-            cpu: CPUState::new(),
-            mem: MemoryState::new(),
-            gpu: GPUState::new()
-        }
-    }
-}
 
 fn getROMFileName() -> Result<String, &'static str> {
 
@@ -152,9 +133,10 @@ fn sleep(secsToSleep: f32) -> Result<(), String> {
 
 }
 
-fn step(cpu: &mut CPUState, mem: &mut MemoryState, gpu: &mut GPUState, readyScreensTx: &SyncSender<LCDScreen>) {
+fn step(cpu: &mut CPUState, mem: &mut MemoryState, gpu: &mut GPUState) {
     use gb_gpu::GPUMode::*;
 
+    //step CPU
     let instructionToExecute = readByteFromMemory(mem, cpu.PC);
     
     if cpu.PC > 0xFF {
@@ -166,6 +148,7 @@ fn step(cpu: &mut CPUState, mem: &mut MemoryState, gpu: &mut GPUState, readyScre
     cpu.instructionCycles = cyclesTaken;
     cpu.totalCycles += cyclesTaken;
 
+    //step GPU
     gpu.modeClock += cyclesTaken;
 
     match gpu.mode {
@@ -178,8 +161,7 @@ fn step(cpu: &mut CPUState, mem: &mut MemoryState, gpu: &mut GPUState, readyScre
             if gpu.currLine == 143 {
                 gpu.mode = VBlank;
 
-                println!("Sending...");
-                readyScreensTx.send(gpu.lcd).unwrap();
+                gpu.readyLCD = gpu.lcdInProgress;
             }
             else {
                 gpu.mode = ScanOAM;
@@ -233,18 +215,14 @@ fn main() {
         Err(err) => panic!("{}", err)
     };
 
-    let gb = Arc::new(RwLock::new(GameBoy::new()));
-    gb.write().unwrap().mem.romData = romData;
+    let mut cpu = CPUState::new();
+    let mut mem = MemoryState::new();
+    let mut gpu = GPUState::new();
+    mem.romData = romData;
 
-    let isRunning = Arc::new(Mutex::new(true));
-    let mhz = Arc::new(RwLock::new(0f32));
+    let mut isRunning = true;
+    let mut mhz: f32;
 
-    let gbLock = gb.clone();
-    let isRunningLock = isRunning.clone();
-    let mhzLock = mhz.clone();
-
-    let (readyScreensTx, readyScreensRx) = sync_channel::<LCDScreen>(0);
-    
 
     //init SDL 
     let mut sdlContext = sdl2::init().video().events().unwrap();
@@ -253,46 +231,13 @@ fn main() {
     let mut renderer = window.renderer().build().unwrap();
     let font =  sdl2_ttf::Font::from_file(Path::new(FONT_PATH_STR), 12).unwrap();
 
-    //spawn game boy thread 
-    let emuThread = thread::spawn(move || {
-
-        let mut batchCycles = 0u32;
-        let mut start = get_performance_counter();
-
-        while *isRunningLock.lock().unwrap() {
-            {
-                let mut gbLock = &mut *gbLock.write().unwrap();
-                step(&mut gbLock.cpu, &mut gbLock.mem, &mut gbLock.gpu, &readyScreensTx);
-                batchCycles += gbLock.cpu.instructionCycles;
-            }
-
-            //sleep every several thousand cycles
-            if batchCycles >= CYCLES_PER_SLEEP {
-                let secsElapsed = secondsForCountRange(start, get_performance_counter());
-                let targetSecs =  batchCycles as f32 / CLOCK_SPEED_HZ; 
-
-                if secsElapsed < targetSecs {
-                    let secsToSleep = targetSecs - secsElapsed;
-                    sleep(secsToSleep).unwrap();
-                }
-
-                let secsElapsed = secondsForCountRange(start, get_performance_counter());
-                let hz = batchCycles as f32 / secsElapsed;
-                *mhzLock.write().unwrap() = hz / 1000000f32;
-
-                batchCycles = 0;
-                start = get_performance_counter();
-
-            }
-        }
-    });
 
     let mut fps = 0f32;
 
     let mut shouldDisplayDebug = true;
 
-    //I/O loop
-    while *isRunning.lock().unwrap() {
+    //main loop
+    while isRunning {
 
         let start = get_performance_counter();
 
@@ -300,7 +245,7 @@ fn main() {
         for event in sdlContext.event_pump().poll_iter() {
 
             match event {
-                Event::Quit{..} => *isRunning.lock().unwrap() = false,
+                Event::Quit{..} => isRunning = false,
                 Event::KeyDown{keycode: keyOpt, ..} => {
                     match keyOpt {
                         Some(key) => {
@@ -318,18 +263,30 @@ fn main() {
         
         renderer.clear();
 
+        //run several thousand game boy cycles or so 
+        let mut batchCycles = 0u32;
 
-        //draw LCD screen
-        let lcdScreen = match readyScreensRx.recv() {
-            Ok(screen) => screen,
-            Err(err) => panic!("A fatal error has occurred: {}", err)
-        };
-        println!("Received");
+        while batchCycles < CYCLES_PER_SLEEP{
+            step(&mut cpu, &mut mem, &mut gpu);
+            batchCycles += cpu.instructionCycles;
+        }
+        let secsElapsed = secondsForCountRange(start, get_performance_counter());
+        let targetSecs =  batchCycles as f32 / CLOCK_SPEED_HZ; 
 
+        if secsElapsed < targetSecs {
+            let secsToSleep = targetSecs - secsElapsed;
+            sleep(secsToSleep).unwrap();
+        }
+
+        let secsElapsed = secondsForCountRange(start, get_performance_counter());
+        let hz = batchCycles as f32 / secsElapsed;
+        mhz = hz / 1000000f32;
+        
+        
         let mut x = 0u32;
         let mut y  = 0u32;
 
-        for row in &lcdScreen[..] {
+        for row in &gpu.readyLCD[..] {
             for pixel in &row[..] {
 
                 let color = match *pixel {
@@ -352,32 +309,24 @@ fn main() {
         if shouldDisplayDebug { 
             let toPrint: String;
 
-            //acquire lock on gb object
-            {
-                let gb = gb.read().unwrap();
-                let cpu = &gb.cpu;
-                let mem = &gb.mem;
-                let mhz = mhz.read().unwrap();
+            let mut instructionToPrint = readByteFromMemory(&mut mem, cpu.PC) as u16;
 
-                let mut instructionToPrint = readByteFromMemory(mem, cpu.PC) as u16;
+            if instructionToPrint == 0xCB {
+                instructionToPrint =  word(0xCBu8, readByteFromMemory(&mem, cpu.PC.wrapping_add(1)))
+            }
 
-                if instructionToPrint == 0xCB {
-                    instructionToPrint =  word(0xCBu8, readByteFromMemory(&mem, cpu.PC.wrapping_add(1)))
-                }
+            //print debug details
+            toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
+                              format!("Current Insruction: {}\tOpcode:{:X}", disassemble(&cpu, &mem), instructionToPrint),
+                              format!("Total Cycles: {}, Cycles just executed: {}", cpu.totalCycles, cpu.instructionCycles),
+                              format!("Mhz {:.*}", 2, mhz),
+                              format!("Currently in BIOS: {}", mem.inBios),
+                              format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, cpu.F), isFlagSet(Flag::Neg, cpu.F), isFlagSet(Flag::Half, cpu.F), isFlagSet(Flag::Carry, cpu.F)),
+                              format!("PC: {:X}\tSP: {:X}", cpu.PC, cpu.SP),
+                              format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", cpu.A, cpu.F, cpu.B, cpu.C),
+                              format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", cpu.D, cpu.E, cpu.H, cpu.L),
+                              format!("FPS: {}", fps));
 
-                //print debug details
-                toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
-                                  format!("Current Insruction: {}\tOpcode:{:X}", disassemble(&cpu, &mem), instructionToPrint),
-                                  format!("Total Cycles: {}, Cycles just executed: {}", cpu.totalCycles, cpu.instructionCycles),
-                                  format!("Mhz {:.*}", 2, *mhz),
-                                  format!("Currently in BIOS: {}", mem.inBios),
-                                  format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, cpu.F), isFlagSet(Flag::Neg, cpu.F), isFlagSet(Flag::Half, cpu.F), isFlagSet(Flag::Carry, cpu.F)),
-                                  format!("PC: {:X}\tSP: {:X}", cpu.PC, cpu.SP),
-                                  format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", cpu.A, cpu.F, cpu.B, cpu.C),
-                                  format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", cpu.D, cpu.E, cpu.H, cpu.L),
-                                  format!("FPS: {}", fps));
-
-            } //release lock
 
 
             let fontSurf =  font.render_str_blended_wrapped(&toPrint, Color::RGBA(255,0,0,255), SCREEN_WIDTH).unwrap();
@@ -402,7 +351,6 @@ fn main() {
     }
 
 
-    emuThread.join().unwrap();
 
     sdl2_ttf::quit();
 

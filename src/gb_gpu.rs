@@ -19,7 +19,8 @@ pub struct GPUState {
     pub mode: GPUMode,
     pub modeClock: u32,
     pub currLine: u32,
-    pub lcd: [[LCDPixelColor;144];160],
+    pub lcdInProgress: LCDScreen, //the screen currently being constructed
+    pub readyLCD: LCDScreen, //the screen ready to be flipped to SDL
 }
 
 impl GPUState {
@@ -28,7 +29,8 @@ impl GPUState {
             mode: GPUMode::ScanOAM,
             modeClock: 0,
             currLine: 0,
-            lcd: [[LCDPixelColor::White;144];160],
+            lcdInProgress: [[LCDPixelColor::White;144];160], 
+            readyLCD: [[LCDPixelColor::White;144];160], 
         }
     }
 }
