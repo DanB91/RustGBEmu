@@ -341,14 +341,13 @@ fn load8() {//0x6, 0xE, 0x16, 0x1E
             let mut mem = tetrisMemoryState();
             let oldPC = cpu.PC;
 
-            writeWordToMemory(&mut mem, $instr, cpu.PC); //load instruction
             writeWordToMemory(&mut mem, 0xAA, cpu.PC+1); //load value
 
-            step(&mut cpu, &mut mem);
+            let (newPC, cyclesTaken) = executeInstruction($instr, &mut cpu, &mut mem);
 
             assert!(cpu.$reg == 0xAA);
-            assert!(cpu.instructionCycles == 8);
-            assert!(cpu.PC == oldPC + 2);
+            assert!(cyclesTaken == 8);
+            assert!(newPC == oldPC + 2);
         })
     }
 

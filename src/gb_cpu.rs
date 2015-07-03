@@ -1511,16 +1511,4 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
 }
 
 
-pub fn step(cpu: &mut CPUState, mem: &mut MemoryState) {
-    let instructionToExecute = readByteFromMemory(mem, cpu.PC);
-    
-    if cpu.PC > 0xFF {
-        mem.inBios = false;
-    }
-
-    let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
-    cpu.PC = newPC;
-    cpu.instructionCycles = cyclesTaken;
-    cpu.totalCycles += cyclesTaken;
-}
 
