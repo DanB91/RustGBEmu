@@ -14,12 +14,22 @@ pub fn word(high: u8, low: u8) -> u16 {
     (high as u16) << 8 | low as u16
 }
 
+//NOTE(DanB):anything accessed by MMU goes in here
+//hence why GPU is a field
+//TODO(DanB): Rename this struct
 pub struct MemoryState {
     pub workingRAM: [u8;0x2000],
     pub zeroPageRAM: [u8;0x7F],
     pub romData: Vec<u8>,
-    pub inBios: bool
+    pub inBios: bool,
+    
+    //lcd fields
+    pub lcdMode: LCDMode,
+    pub lcdModeClock: u32,
+    pub currScanLine: u8,
+    pub videoRAM: [u8;0x2000]
 }
+
 impl MemoryState {
 
     pub fn new() -> MemoryState {
@@ -27,12 +37,26 @@ impl MemoryState {
             workingRAM: [0;0x2000],
             zeroPageRAM: [0;0x7F],
             romData: vec![],
-            inBios: true
+            inBios: true,
+            
+            lcdMode: LCDMode::ScanOAM,
+            lcdModeClock: 0,
+            currScanLine: 0,
+            videoRAM: [0;0x2000],
         }
     }
 
 
 }
+
+
+pub enum LCDMode {
+    HBlank = 0,
+    VBlank, 
+    ScanOAM,
+    ScanVRAM
+}
+
 pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
 
 
@@ -57,20 +81,14 @@ pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
 
     let i = addr as usize;
     match addr {
-        0...0xFF =>  
-            if memory.inBios {
-                bios[i]
-            }  else {
-                memory.romData[i]
-            },
-        0x100...0x3FFF =>  
-            memory.romData[i],
-        0xC000...0xDFFF =>
-            memory.workingRAM[i - 0xC000],
-        0xE000...0xFDFF => //echo of internal RAM
-            memory.workingRAM[i - 0xE000],
-        0xFF80...0xFFFE =>
-            memory.zeroPageRAM[i - 0xFF80],
+        0...0xFF if memory.inBios => bios[i],  
+        0...0xFF if !memory.inBios => memory.romData[i], 
+        0x100...0x3FFF => memory.romData[i],
+        0x8000...0x9FFF => memory.videoRAM[i - 0x8000],
+        0xC000...0xDFFF => memory.workingRAM[i - 0xC000],
+        0xE000...0xFDFF => memory.workingRAM[i - 0xE000], //echo of internal RAM 
+        0xFF44 => memory.currScanLine,
+        0xFF80...0xFFFE => memory.zeroPageRAM[i - 0xFF80],
         _ => 0
     }
 }
@@ -79,8 +97,10 @@ pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
 pub fn writeByteToMemory(memory: &mut MemoryState, byte: u8, addr: u16) {
     let i = addr as usize;
     match addr {
+        0x8000...0x9FFF => memory.videoRAM[i - 0x8000] = byte,
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
+        0xFF44 => memory.currScanLine = 0, //resets the current line if written to
         0xFF80...0xFFFE => memory.zeroPageRAM[i - 0xFF80] = byte,     
         _ => {}
     }
@@ -149,8 +169,18 @@ mod tests {
         assert!(readByteFromMemory(&memory,0xDFFF) ==
                 memory.zeroPageRAM[0x10]);
         assert!(readByteFromMemory(&memory,0xFF90) == 0xAA); //reading from zero page ram
-    }
 
+        writeByteToMemory(&mut memory,0xAA, 0x8010) ; //writing to videoRAM
+        assert!(readByteFromMemory(&memory,0x8010) ==
+                memory.videoRAM[0x10]);
+        assert!(readByteFromMemory(&memory,0x8010) == 0xAA); //reading from videoRAM
+        
+
+        writeByteToMemory(&mut memory,0xAA, 0x8010) ; //writing to videoRAM
+        assert!(readByteFromMemory(&memory,0x8010) ==
+                memory.videoRAM[0x10]);
+        assert!(readByteFromMemory(&memory,0x8010) == 0xAA); //reading from videoRAM
+    }
 #[test]
     fn testReadAndWriteWord() {
         let romData = match openROM(MBC0_ROM) {
@@ -179,6 +209,23 @@ mod tests {
         
         writeWordToMemory(&mut memory,0xAAFF, 0xFFFD); //writing to zero page ram
         assert!(readWordFromMemory(&memory,0xFFFD) == 0xAAFF); //reading from zero page ram
+        
+        writeWordToMemory(&mut memory,0xAAFF, 0x8000); //writing to video ram
+        assert!(readWordFromMemory(&memory,0x8000) == 0xAAFF); //reading from zero page ram
     }
+    
+    
+    #[test]
+    fn testLCDControls() {
+        let mut mem = MemoryState::new();
+
+        //test scanline 
+        mem.currScanLine = 133;
+        assert_eq!(readByteFromMemory(&mem,0xFF44), mem.currScanLine);
+        writeByteToMemory(&mut mem,0xAA, 0xFF44) ; //writing resets current scan line count
+        assert_eq!(readByteFromMemory(&mem,0xFF44), 0);
+
+    }
+
 }
 

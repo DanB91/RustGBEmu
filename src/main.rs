@@ -11,7 +11,6 @@ extern crate errno;
 
 mod gb_memory;
 mod gb_cpu;
-mod gb_gpu;
 mod sdl2_ttf;
 
 use std::env;
@@ -24,10 +23,9 @@ use errno::*;
 
 use gb_memory::*;
 use gb_cpu::*;
-use gb_gpu::*;
 
 use sdl2::pixels::Color;
-//use sdl2::render::Renderer;
+use sdl2::render::Renderer;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::timer::{get_performance_counter, get_performance_frequency};
@@ -43,6 +41,16 @@ const SCREEN_HEIGHT: u32 = 144 * GAMEBOY_SCALE;
 
 const SECONDS_PER_FRAME: f32 = 1f32/60f32;
 const CYCLES_PER_SLEEP: u32 = 60000;
+
+pub type LCDScreen = [[LCDPixelColor;144];160]; 
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum LCDPixelColor {
+    White,
+    Light,
+    Dark,
+    Black
+}
 
 fn getROMFileName() -> Result<String, &'static str> {
 
@@ -133,8 +141,8 @@ fn sleep(secsToSleep: f32) -> Result<(), String> {
 
 }
 
-fn step(cpu: &mut CPUState, mem: &mut MemoryState, gpu: &mut GPUState) {
-    use gb_gpu::GPUMode::*;
+fn step(cpu: &mut CPUState, mem: &mut MemoryState, lcdScreen: &mut LCDScreen, renderer: &mut Renderer) {
+    use gb_memory::LCDMode::*;
 
     //step CPU
     let instructionToExecute = readByteFromMemory(mem, cpu.PC);
@@ -149,52 +157,74 @@ fn step(cpu: &mut CPUState, mem: &mut MemoryState, gpu: &mut GPUState) {
     cpu.totalCycles += cyclesTaken;
 
     //step GPU
-    gpu.modeClock += cyclesTaken;
+    mem.lcdModeClock += cyclesTaken;
+    match mem.lcdMode {
 
-    match gpu.mode {
-
-        HBlank if gpu.modeClock >= 204 => {
-            gpu.modeClock = 0;
-            gpu.currLine += 1;
+        HBlank if mem.lcdModeClock >= 204 => {
+            mem.lcdModeClock = 0;
+            mem.currScanLine += 1;
 
             //at the last line, engage VBlank and draw SDL screen
-            if gpu.currLine == 143 {
-                gpu.mode = VBlank;
+            if mem.currScanLine == 143 {
+                mem.lcdMode = VBlank;
 
-                gpu.readyLCD = gpu.lcdInProgress;
+                //draw to screen
+                let mut x = 0u32;
+                let mut y  = 0u32;
+
+                for row in &lcdScreen[..] {
+                    for pixel in &row[..] {
+
+                        let color = match *pixel {
+                            LCDPixelColor::White => Color::RGBA(255,255,255,255),
+                            LCDPixelColor::Light => Color::RGBA(170,170,170,255),
+                            LCDPixelColor::Dark => Color::RGBA(85,85,85,255),
+                            LCDPixelColor::Black => Color::RGBA(0,0,0,255)
+                        };
+
+                        renderer.set_draw_color(color);
+                        renderer.draw_rect(Rect::new_unwrap(x as i32 ,y as i32, GAMEBOY_SCALE, GAMEBOY_SCALE));
+
+                        x = (x + GAMEBOY_SCALE) % (row.len() as u32 * GAMEBOY_SCALE);
+                    }
+
+                    y += GAMEBOY_SCALE;
+                }
             }
             else {
-                gpu.mode = ScanOAM;
+                mem.lcdMode = ScanOAM;
             }
         },
 
-        VBlank if gpu.modeClock >= 456 => {
-            gpu.currLine += 1;
+        VBlank if mem.lcdModeClock >= 456 => {
+            mem.currScanLine += 1;
+            mem.lcdModeClock = 0;
 
-            if gpu.currLine == 153 {
-                gpu.mode = ScanOAM;
-                gpu.currLine = 0;
-                gpu.modeClock = 0;
+            if mem.currScanLine == 153 {
+                mem.lcdMode = ScanOAM;
+                mem.currScanLine = 0;
             }
         },
 
-        ScanOAM if gpu.modeClock >= 80 => {
+        ScanOAM if mem.lcdModeClock >= 80 => {
             //TODO: Draw OAM to internal screen buffer
 
-            gpu.mode = ScanVRAM;
-            gpu.modeClock = 0;
+            mem.lcdMode = ScanVRAM;
+            mem.lcdModeClock = 0;
         },
 
-        ScanVRAM if gpu.modeClock >= 172 => {
+        ScanVRAM if mem.lcdModeClock >= 172 => {
             //TODO: Draw VRAM to internal screen buffer
-            gpu.mode = HBlank;
-            gpu.modeClock = 0;
+            mem.lcdMode = HBlank;
+            mem.lcdModeClock = 0;
 
         },
 
         _ => {} //do nothing
     }
 }
+
+
 
 //TODO(DanB): Handle unwrap
 fn main() {
@@ -217,7 +247,8 @@ fn main() {
 
     let mut cpu = CPUState::new();
     let mut mem = MemoryState::new();
-    let mut gpu = GPUState::new();
+    let mut lcdScreen = [[LCDPixelColor::White;144];160];
+
     mem.romData = romData;
 
     let mut isRunning = true;
@@ -267,7 +298,7 @@ fn main() {
         let mut batchCycles = 0u32;
 
         while batchCycles < CYCLES_PER_SLEEP{
-            step(&mut cpu, &mut mem, &mut gpu);
+            step(&mut cpu, &mut mem, &mut lcdScreen, &mut renderer);
             batchCycles += cpu.instructionCycles;
         }
         let secsElapsed = secondsForCountRange(start, get_performance_counter());
@@ -283,27 +314,6 @@ fn main() {
         mhz = hz / 1000000f32;
         
         
-        let mut x = 0u32;
-        let mut y  = 0u32;
-
-        for row in &gpu.readyLCD[..] {
-            for pixel in &row[..] {
-
-                let color = match *pixel {
-                    LCDPixelColor::White => Color::RGBA(255,255,255,255),
-                    LCDPixelColor::Light => Color::RGBA(170,170,170,255),
-                    LCDPixelColor::Dark => Color::RGBA(85,85,85,255),
-                    LCDPixelColor::Black => Color::RGBA(0,0,0,255)
-                };
-
-                renderer.set_draw_color(color);
-                renderer.draw_rect(Rect::new_unwrap(x as i32 ,y as i32, GAMEBOY_SCALE, GAMEBOY_SCALE));
-
-                x = (x + GAMEBOY_SCALE) % (row.len() as u32 * GAMEBOY_SCALE);
-            }
-
-            y += GAMEBOY_SCALE;
-        }
 
         //display Game Boy debug stats
         if shouldDisplayDebug { 
@@ -317,7 +327,7 @@ fn main() {
 
             //print debug details
             toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
-                              format!("Current Insruction: {}\tOpcode:{:X}", disassemble(&cpu, &mem), instructionToPrint),
+                              format!("Opcode:{:X}", instructionToPrint),
                               format!("Total Cycles: {}, Cycles just executed: {}", cpu.totalCycles, cpu.instructionCycles),
                               format!("Mhz {:.*}", 2, mhz),
                               format!("Currently in BIOS: {}", mem.inBios),

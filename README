@@ -1,11 +1,18 @@
-The goal of this project is to create a Game Boy emulator in Rust.  Right now it only displays CPU debug information.
-It is compiled with the Rust 1.0 beta.
+The goal of this project is to create a Game Boy emulator in Rust.  
+It is compiled with the Rust 1.1 beta.
 
 To run:
 cargo run <path to Game Boy ROM>
 
-Currently, you can just step through each CPU instruction in the ROM by hitting enter. 
-Not all CPU opcodes are implemented yet.
+Native dependences (you must manually install):
+    -SDL2
+    -SDL2_TTF
+
+All rust dependencies will automatically be downloaded by cargo.
+Tested on OS X and Linux.
+
+Right now it only displays a blank white screen with CPU debug information on top of it.  
+Debug information can be toggled on and off with "D".
 
 
 To run unit tests:
