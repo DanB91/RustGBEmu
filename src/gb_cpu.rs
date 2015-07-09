@@ -1505,7 +1505,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
         //No FD
         //FE implemented above
         0xFF => restart!(0x38), //RST 38H
-        _ => panic!("Illegal instruction")
+        _ => panic!("Illegal instruction {:X}. PC: {:X} ", instruction, cpu.PC)
 
     }
 }

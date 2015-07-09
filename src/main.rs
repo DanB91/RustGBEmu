@@ -25,32 +25,26 @@ use gb_memory::*;
 use gb_cpu::*;
 
 use sdl2::pixels::Color;
-use sdl2::render::Renderer;
+//use sdl2::render::Renderer;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::timer::{get_performance_counter, get_performance_frequency};
 use sdl2::rect::Rect;
 
+use sdl2_ttf::Font;
+
+use gb_memory::LCDMode::*;
 
 static USAGE: &'static str= "Usage: gbemu path_to_rom";
 static FONT_PATH_STR: &'static str = "res/Gamegirl.ttf";
 
-const GAMEBOY_SCALE: u32 = 4;
+const GAMEBOY_SCALE: u32 = 1;
 const SCREEN_WIDTH: u32 = 160 * GAMEBOY_SCALE;
 const SCREEN_HEIGHT: u32 = 144 * GAMEBOY_SCALE;
 
 const SECONDS_PER_FRAME: f32 = 1f32/60f32;
 const CYCLES_PER_SLEEP: u32 = 60000;
 
-pub type LCDScreen = [[LCDPixelColor;144];160]; 
-
-#[derive(Copy, Clone, PartialEq)]
-pub enum LCDPixelColor {
-    White,
-    Light,
-    Dark,
-    Black
-}
 
 fn getROMFileName() -> Result<String, &'static str> {
 
@@ -118,7 +112,7 @@ fn sleep(secsToSleep: f32) -> Result<(), String> {
 
     unsafe {
         let microSecsToSleep = (newSecsToSleep * 1000000f32) as u32;
-        
+
         if usleep(microSecsToSleep) == -1{
             let error = errno();
             match error {
@@ -140,90 +134,6 @@ fn sleep(secsToSleep: f32) -> Result<(), String> {
     }
 
 }
-
-fn step(cpu: &mut CPUState, mem: &mut MemoryState, lcdScreen: &mut LCDScreen, renderer: &mut Renderer) {
-    use gb_memory::LCDMode::*;
-
-    //step CPU
-    let instructionToExecute = readByteFromMemory(mem, cpu.PC);
-    
-    if cpu.PC > 0xFF {
-        mem.inBios = false;
-    }
-
-    let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
-    cpu.PC = newPC;
-    cpu.instructionCycles = cyclesTaken;
-    cpu.totalCycles += cyclesTaken;
-
-    //step GPU
-    mem.lcdModeClock += cyclesTaken;
-    match mem.lcdMode {
-
-        HBlank if mem.lcdModeClock >= 204 => {
-            mem.lcdModeClock = 0;
-            mem.currScanLine += 1;
-
-            //at the last line, engage VBlank and draw SDL screen
-            if mem.currScanLine == 143 {
-                mem.lcdMode = VBlank;
-
-                //draw to screen
-                let mut x = 0u32;
-                let mut y  = 0u32;
-
-                for row in &lcdScreen[..] {
-                    for pixel in &row[..] {
-
-                        let color = match *pixel {
-                            LCDPixelColor::White => Color::RGBA(255,255,255,255),
-                            LCDPixelColor::Light => Color::RGBA(170,170,170,255),
-                            LCDPixelColor::Dark => Color::RGBA(85,85,85,255),
-                            LCDPixelColor::Black => Color::RGBA(0,0,0,255)
-                        };
-
-                        renderer.set_draw_color(color);
-                        renderer.draw_rect(Rect::new_unwrap(x as i32 ,y as i32, GAMEBOY_SCALE, GAMEBOY_SCALE));
-
-                        x = (x + GAMEBOY_SCALE) % (row.len() as u32 * GAMEBOY_SCALE);
-                    }
-
-                    y += GAMEBOY_SCALE;
-                }
-            }
-            else {
-                mem.lcdMode = ScanOAM;
-            }
-        },
-
-        VBlank if mem.lcdModeClock >= 456 => {
-            mem.currScanLine += 1;
-            mem.lcdModeClock = 0;
-
-            if mem.currScanLine == 153 {
-                mem.lcdMode = ScanOAM;
-                mem.currScanLine = 0;
-            }
-        },
-
-        ScanOAM if mem.lcdModeClock >= 80 => {
-            //TODO: Draw OAM to internal screen buffer
-
-            mem.lcdMode = ScanVRAM;
-            mem.lcdModeClock = 0;
-        },
-
-        ScanVRAM if mem.lcdModeClock >= 172 => {
-            //TODO: Draw VRAM to internal screen buffer
-            mem.lcdMode = HBlank;
-            mem.lcdModeClock = 0;
-
-        },
-
-        _ => {} //do nothing
-    }
-}
-
 
 
 //TODO(DanB): Handle unwrap
@@ -247,25 +157,24 @@ fn main() {
 
     let mut cpu = CPUState::new();
     let mut mem = MemoryState::new();
-    let mut lcdScreen = [[LCDPixelColor::White;144];160];
+    let mut lcdScreen = [[LCDPixelColor::White;160];144];
 
     mem.romData = romData;
 
     let mut isRunning = true;
-    let mut mhz: f32;
-
+    let mut mhz = 0f32;
 
     //init SDL 
     let mut sdlContext = sdl2::init().video().events().unwrap();
     sdl2_ttf::init().unwrap();
     let window = sdlContext.window("GB Emu", SCREEN_WIDTH, SCREEN_HEIGHT).position_centered().build().unwrap();
     let mut renderer = window.renderer().build().unwrap();
-    let font =  sdl2_ttf::Font::from_file(Path::new(FONT_PATH_STR), 12).unwrap();
+    let font =  Font::from_file(Path::new(FONT_PATH_STR), 12).unwrap();
 
 
     let mut fps = 0f32;
 
-    let mut shouldDisplayDebug = true;
+    let mut shouldDisplayDebug = false;
 
     //main loop
     while isRunning {
@@ -291,14 +200,193 @@ fn main() {
                 _ => {}
             }   
         }
-        
-        renderer.clear();
+
 
         //run several thousand game boy cycles or so 
         let mut batchCycles = 0u32;
 
+        //one Game Boy "step" per iteration
         while batchCycles < CYCLES_PER_SLEEP{
-            step(&mut cpu, &mut mem, &mut lcdScreen, &mut renderer);
+            //step CPU
+            let instructionToExecute = readByteFromMemory(&mut mem, cpu.PC);
+
+            let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, &mut cpu, &mut mem); 
+            cpu.PC = newPC;
+            cpu.instructionCycles = cyclesTaken;
+            cpu.totalCycles += cyclesTaken;
+
+            //step GPU
+            mem.lcdModeClock += cyclesTaken;
+            match mem.lcdMode {
+
+                HBlank if mem.lcdModeClock >= 204 => {
+                    mem.lcdModeClock = 0;
+                    mem.currScanLine += 1;
+
+                    //at the last line, engage VBlank and draw SDL screen
+                    if mem.currScanLine == 143 {
+                        renderer.clear();
+
+                        //draw LCD screen
+                        let mut x = 0u32;
+                        let mut y  = 0u32;
+
+                        for row in &lcdScreen[..] {
+                            for pixel in &row[..] {
+
+                                let color = match *pixel {
+                                    LCDPixelColor::White => Color::RGBA(255,255,255,255),
+                                    LCDPixelColor::Light => Color::RGBA(170,170,170,255),
+                                    LCDPixelColor::Dark => Color::RGBA(85,85,85,255),
+                                    LCDPixelColor::Black => Color::RGBA(0,0,0,255)
+                                };
+
+                                renderer.set_draw_color(color);
+                                renderer.fill_rect(Rect::new_unwrap(x as i32 ,y as i32, GAMEBOY_SCALE, GAMEBOY_SCALE));
+
+                                x = (x + GAMEBOY_SCALE) % (row.len() as u32 * GAMEBOY_SCALE);
+                            }
+
+                            y += GAMEBOY_SCALE;
+                        }
+                        //display Game Boy debug stats
+                        if shouldDisplayDebug { 
+                            let toPrint: String;
+
+                            let mut instructionToPrint = readByteFromMemory(&mut mem, cpu.PC) as u16;
+
+                            if instructionToPrint == 0xCB {
+                                instructionToPrint =  word(0xCBu8, readByteFromMemory(&mut mem, cpu.PC.wrapping_add(1)))
+                            }
+
+                            //print debug details
+                            toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
+                                              format!("Opcode:{:X}", instructionToPrint),
+                                              format!("Total Cycles: {}, Cycles just executed: {}", cpu.totalCycles, cpu.instructionCycles),
+                                              format!("Mhz {:.*}", 2, mhz),
+                                              format!("Currently in BIOS: {}", mem.inBios),
+                                              format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, cpu.F), isFlagSet(Flag::Neg, cpu.F), isFlagSet(Flag::Half, cpu.F), isFlagSet(Flag::Carry, cpu.F)),
+                                              format!("PC: {:X}\tSP: {:X}", cpu.PC, cpu.SP),
+                                              format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", cpu.A, cpu.F, cpu.B, cpu.C),
+                                              format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", cpu.D, cpu.E, cpu.H, cpu.L),
+                                              format!("FPS: {}", fps));
+
+
+
+                            let fontSurf =  font.render_str_blended_wrapped(&toPrint, Color::RGBA(255,0,0,255), SCREEN_WIDTH).unwrap();
+                            let mut fontTex = renderer.create_texture_from_surface(&fontSurf).unwrap();
+
+                            let (texW, texH) = { let q = fontTex.query(); (q.width, q.height)};
+                            renderer.copy(&mut fontTex, None, sdl2::rect::Rect::new(0, 0, texW, texH).unwrap());
+                        }
+
+
+                        renderer.present();
+                        mem.lcdMode = VBlank;
+                    }
+                    else {
+                        mem.lcdMode = ScanOAM;
+                    }
+                },
+
+                VBlank if mem.lcdModeClock >= 456 => {
+                    mem.currScanLine += 1;
+                    mem.lcdModeClock = 0;
+
+                    if mem.currScanLine == 153 {
+                        mem.lcdMode = ScanOAM;
+                        mem.currScanLine = 0;
+
+                    }
+                },
+
+                ScanOAM if mem.lcdModeClock >= 80 => {
+                    //TODO: Draw OAM to internal screen buffer
+
+
+                    mem.lcdMode = ScanVRAM;
+                    mem.lcdModeClock = 0;
+                },
+
+                ScanVRAM if mem.lcdModeClock >= 172 => {
+                    //TODO: Draw VRAM to internal screen buffer
+                    
+                    let y = mem.lcdSCY.wrapping_add(mem.currScanLine);
+
+                    let mut tileRefAddr = match mem.tileMap {
+                        0 => 0x1800usize,  //it is 0x1800 instead of 0x9800 because this is relative to start of vram
+                        1 => 0x1C00usize,
+                        _ => panic!("Uh oh, the tile map should only be 0 or 1")
+                    };
+
+                    /* Tile Map:
+                     *
+                     * Each "row" is 32 bytes long where each byte is a tile reference
+                     * Each byte represents a 8x8 pixel tils, so each row and column are 256 pixels long
+                     * Each byte represents a 16 byte tile where every 2 bytes represents an 8 pixel row
+                     *
+                     *------------------------------------------------------
+                     *|tile ref | tile ref | ...............................
+                     *|-----------------------------------------------------
+                     *|tile ref | tile ref | ...............................
+                     *|.
+                     *|.
+                     *|.
+                     */
+                    tileRefAddr += (y as usize / 8) * 32; //which tile in the y dimension?
+
+                    let tileRefRowStart = tileRefAddr; // start of the row in the 32x32 tile map
+
+                    tileRefAddr += mem.lcdSCX as usize / 8; //which tile in x dimension?
+
+                    //the x pixel is gotten by shifting a mask of the form 100000
+                    let mut xMask = 0x80u8 >> (mem.lcdSCX & 7);
+
+                    for x in 0..160 {
+
+                        let tileRef = mem.videoRAM[tileRefAddr];
+
+                        //find the tile based on the tile reference
+                        let mut tileAddr = match mem.tileSet {
+                            0 => (tileRef as usize) * 16usize, 
+                              1 => (0x1000i16 + ((tileRef as i8 as i16) * 16)) as usize, //signed addition
+                              _ => panic!("Uh oh, the tile set should only be 0 or 1")
+                        };
+
+                        //since we already found the correct tile, we only need the last 3 bits of the 
+                        //y-scroll register to determine where in the tile we start
+                        tileAddr += ((y & 7) as usize) * 2;
+
+                        let highBit = if (mem.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
+                        let lowBit = if (mem.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
+
+                        let color = mem.palette[((highBit * 2) + lowBit) as usize];
+
+                        //after all this shit, finally draw the pixel
+                        lcdScreen[mem.currScanLine as usize][x as usize] = color; 
+
+                        //update xMask and tile reference appropriately if we are at the end of a tile
+                        match xMask {
+                            1 => {
+                                xMask = 0x80;
+                                //the mod 32 makes sure we wrap around to the beginning of the tile map row,
+                                //if need be
+                                tileRefAddr = tileRefRowStart + ((tileRefAddr + 1) % 32);
+                            },
+                            _ => xMask >>= 1
+                        };
+
+                    }
+
+
+
+                    mem.lcdMode = HBlank;
+                    mem.lcdModeClock = 0;
+
+                },
+
+                _ => {} //do nothing
+            }
             batchCycles += cpu.instructionCycles;
         }
         let secsElapsed = secondsForCountRange(start, get_performance_counter());
@@ -312,50 +400,15 @@ fn main() {
         let secsElapsed = secondsForCountRange(start, get_performance_counter());
         let hz = batchCycles as f32 / secsElapsed;
         mhz = hz / 1000000f32;
-        
-        
-
-        //display Game Boy debug stats
-        if shouldDisplayDebug { 
-            let toPrint: String;
-
-            let mut instructionToPrint = readByteFromMemory(&mut mem, cpu.PC) as u16;
-
-            if instructionToPrint == 0xCB {
-                instructionToPrint =  word(0xCBu8, readByteFromMemory(&mem, cpu.PC.wrapping_add(1)))
-            }
-
-            //print debug details
-            toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
-                              format!("Opcode:{:X}", instructionToPrint),
-                              format!("Total Cycles: {}, Cycles just executed: {}", cpu.totalCycles, cpu.instructionCycles),
-                              format!("Mhz {:.*}", 2, mhz),
-                              format!("Currently in BIOS: {}", mem.inBios),
-                              format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, cpu.F), isFlagSet(Flag::Neg, cpu.F), isFlagSet(Flag::Half, cpu.F), isFlagSet(Flag::Carry, cpu.F)),
-                              format!("PC: {:X}\tSP: {:X}", cpu.PC, cpu.SP),
-                              format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", cpu.A, cpu.F, cpu.B, cpu.C),
-                              format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", cpu.D, cpu.E, cpu.H, cpu.L),
-                              format!("FPS: {}", fps));
 
 
-
-            let fontSurf =  font.render_str_blended_wrapped(&toPrint, Color::RGBA(255,0,0,255), SCREEN_WIDTH).unwrap();
-            let mut fontTex = renderer.create_texture_from_surface(&fontSurf).unwrap();
-
-            let (texW, texH) = { let q = fontTex.query(); (q.width, q.height)};
-            renderer.copy(&mut fontTex, None, sdl2::rect::Rect::new(0, 0, texW, texH).unwrap());
-        }
-
-        renderer.present();
-
-        /*
         let secsElapsed = secondsForCountRange(start, get_performance_counter());
 
         //60 fps
         if secsElapsed < SECONDS_PER_FRAME {
             sleep(SECONDS_PER_FRAME - secsElapsed).unwrap();
         }
-        */
+
         fps = 1f32/secondsForCountRange(start, get_performance_counter());
 
     }
