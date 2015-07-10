@@ -646,14 +646,14 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             clearFlag!(Half);
 
             let temp = if isFlagSet!(Carry) {
-                $toRotate << 1 | 1
+                ($toRotate << 1) | 1
             }
             else {
                 $toRotate << 1
             };
 
             setFlagIf!(Carry, $toRotate & 0x80 != 0);
-            setFlagIf!(Zero, $toRotate == 0);
+            setFlagIf!(Zero, temp == 0);
 
             $toRotate = temp;
         })
@@ -677,14 +677,14 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryS
             clearFlag!(Half);
 
             let temp = if isFlagSet!(Carry) {
-                $toRotate >> 1 | 0x80
+                ($toRotate >> 1) | 0x80
             }
             else {
                 $toRotate >> 1
             };
 
             setFlagIf!(Carry, $toRotate & 0x1 != 0);
-            setFlagIf!(Zero, $toRotate == 0);
+            setFlagIf!(Zero, temp == 0);
 
             $toRotate = temp;
         })

@@ -38,7 +38,7 @@ use gb_memory::LCDMode::*;
 static USAGE: &'static str= "Usage: gbemu path_to_rom";
 static FONT_PATH_STR: &'static str = "res/Gamegirl.ttf";
 
-const GAMEBOY_SCALE: u32 = 1;
+const GAMEBOY_SCALE: u32 = 2;
 const SCREEN_WIDTH: u32 = 160 * GAMEBOY_SCALE;
 const SCREEN_HEIGHT: u32 = 144 * GAMEBOY_SCALE;
 
@@ -213,7 +213,7 @@ fn main() {
             let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, &mut cpu, &mut mem); 
             cpu.PC = newPC;
             cpu.instructionCycles = cyclesTaken;
-            cpu.totalCycles += cyclesTaken;
+            cpu.totalCycles.wrapping_add(cyclesTaken);
 
             //step GPU
             mem.lcdModeClock += cyclesTaken;
@@ -402,12 +402,14 @@ fn main() {
         mhz = hz / 1000000f32;
 
 
+        /*
         let secsElapsed = secondsForCountRange(start, get_performance_counter());
 
         //60 fps
         if secsElapsed < SECONDS_PER_FRAME {
             sleep(SECONDS_PER_FRAME - secsElapsed).unwrap();
         }
+        */
 
         fps = 1f32/secondsForCountRange(start, get_performance_counter());
 

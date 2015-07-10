@@ -106,6 +106,7 @@ static BIOS: [u8; 0x100] = [
 //TODO: Implement Pallet
 //TODO: Implement Tile Map selection
 //TODO: Implement Tile Set selection
+//TODO: Implement enabling and disabling of screen before adding in conition for writing to VRAM
 pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
     use self::LCDMode::*;
 
@@ -118,7 +119,7 @@ pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
         0x4000...0x7FFF => memory.romData[i], //TODO: Implement bank swapping
         0x8000...0x9FFF => {
             //vram can only be properly accessed when not being drawn from
-            if memory.lcdMode != ScanVRAM {
+            if true/*memory.lcdMode != ScanVRAM*/ {
                 memory.videoRAM[i - 0x8000]
             }
             else {
@@ -161,7 +162,7 @@ pub fn writeByteToMemory(memory: &mut MemoryState, byte: u8, addr: u16) {
     let i = addr as usize;
     match addr {
         //vram can only be properly accessed when not being drawn from
-        0x8000...0x9FFF if memory.lcdMode != ScanVRAM => memory.videoRAM[i - 0x8000] = byte,
+        0x8000...0x9FFF /*if memory.lcdMode != ScanVRAM */=> memory.videoRAM[i - 0x8000] = byte,
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
         0xFF42 => memory.lcdSCY = byte,
