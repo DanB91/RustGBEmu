@@ -64,7 +64,7 @@ pub fn isFlagSet(flag: Flag, F: u8) -> bool {
 }
 
 //return number of bytes to increment PC by
-fn loadImm16(highDest: &mut u8, lowDest: &mut u8, PC: u16, mem: &MemoryState){
+fn loadImm16(highDest: &mut u8, lowDest: &mut u8, PC: u16, mem: &MemoryMapState){
     *highDest = readByteFromMemory(mem, PC.wrapping_add(2));
     *lowDest = readByteFromMemory(mem, PC.wrapping_add(1));
 }
@@ -78,7 +78,7 @@ fn loadImm16(highDest: &mut u8, lowDest: &mut u8, PC: u16, mem: &MemoryState){
  *      SP: the stack pointer
  *
  */
-fn pushOnToStack(mem: &mut MemoryState, value: u16, SP: &mut u16) {
+fn pushOnToStack(mem: &mut MemoryMapState, value: u16, SP: &mut u16) {
     *SP = SP.wrapping_sub(2);
     writeWordToMemory(mem, value, *SP);
 }
@@ -93,7 +93,7 @@ fn pushOnToStack(mem: &mut MemoryState, value: u16, SP: &mut u16) {
  * Return: The 16bit value off of the stack
  *
  */
-fn popOffOfStack(mem: &MemoryState, SP: &mut u16) -> u16 {
+fn popOffOfStack(mem: &MemoryMapState, SP: &mut u16) -> u16 {
     let ret = readWordFromMemory(mem, *SP);
     *SP = SP.wrapping_add(2);
 
@@ -113,7 +113,7 @@ fn disableInterrupts() {
 //NOTE(DanB) the reason I return these values instead of modifying them is because I constantly
 //forget to update the PC and cycles passed.  This way, the compiler will force me to do so.
 //Perhaps I can find a better way
-pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryState) -> (u16, u32) {
+pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryMapState) -> (u16, u32) {
 
     use self::Flag::*;
 

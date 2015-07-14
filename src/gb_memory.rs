@@ -2,6 +2,7 @@ use std::fs;
 use std::io;
 use std::io::Read;
 
+extern crate sdl2;
 
 pub fn hb(word: u16) -> u8 {
     (word >> 8) as u8 
@@ -15,33 +16,31 @@ pub fn word(high: u8, low: u8) -> u16 {
     (high as u16) << 8 | low as u16
 }
 
-//NOTE(DanB):anything accessed by MMU goes in here
-//hence why GPU is a field
-//TODO(DanB): Rename this struct
-pub struct MemoryState {
+//NOTE(DanB):anything accessed by MMU goes in here including LCD related function
+pub struct MemoryMapState {
     pub workingRAM: [u8;0x2000],
     pub zeroPageRAM: [u8;0x7F],
     pub romData: Vec<u8>,
     pub inBios: bool,
     
     //lcd fields
-    pub palette: [LCDPixelColor;4], //color palette
+    pub palette: [Color;4], //color palette
     pub videoRAM: [u8;0x2000],
     pub lcdMode: LCDMode, 
     pub lcdModeClock: u32,
-    pub lcdStatus: u8, //accessed by FF41
     pub lcdSCX: u8, //scroll x
     pub lcdSCY: u8, //scroll y
     pub currScanLine: u8,
-    pub tileMap: u8, //which tile map to use (0 or 1)
-    pub tileSet: u8, //which tile set to use (0 or 1)
+    pub backgroundTileMap: u8, //which background tile map to use (0 or 1)
+    pub backgroundTileSet: u8, //which background tile set to use (0 or 1)
+    pub isLCDEnabled: bool
 
 }
 
-impl MemoryState {
+impl MemoryMapState {
 
-    pub fn new() -> MemoryState {
-        MemoryState {
+    pub fn new() -> MemoryMapState {
+        MemoryMapState {
             workingRAM: [0;0x2000],
             zeroPageRAM: [0;0x7F],
             romData: vec![],
@@ -49,17 +48,14 @@ impl MemoryState {
             
             lcdMode: LCDMode::ScanOAM,
             lcdModeClock: 0,
-            lcdStatus: 2, //2 is ScanOAM
             lcdSCX: 0, //scroll x
             lcdSCY: 0, //scroll y
             currScanLine: 0,
             videoRAM: [0;0x2000],
-            tileMap: 0, //which tile map to use (0 or 1)
-            tileSet: 0, //which tile set to use (0 or 1)
-            palette: [LCDPixelColor::White,
-                LCDPixelColor::White,
-                LCDPixelColor::White,
-                LCDPixelColor::White], //color pallet
+            backgroundTileMap: 0, //which tile map to use (0 or 1)
+            backgroundTileSet: 0, //which tile set to use (0 or 1)
+            palette: [WHITE, WHITE, WHITE, WHITE], //color pallet
+            isLCDEnabled: false
         }
     }
 
@@ -74,15 +70,14 @@ pub enum LCDMode {
     ScanVRAM = 3
 }
 
-pub type LCDScreen = [[LCDPixelColor;160];144]; 
+pub type Color = sdl2::pixels::Color;
+pub const WHITE: Color = sdl2::pixels::Color::RGBA(255, 255, 255, 255);
+pub const LIGHT_GRAY: Color = sdl2::pixels::Color::RGBA(170,170,170,255);
+pub const DARK_GRAY: Color = sdl2::pixels::Color::RGBA(85,85,85,255);
+pub const BLACK: Color = sdl2::pixels::Color::RGBA(0,0,0,255);
 
-#[derive(Copy, Clone, PartialEq)]
-pub enum LCDPixelColor {
-    White,
-    Light,
-    Dark,
-    Black
-}
+pub type LCDScreen = [[Color;160];144]; 
+
 static BIOS: [u8; 0x100] = [
     0x31, 0xFE, 0xFF, 0xAF, 0x21, 0xFF, 0x9F, 0x32, 0xCB, 0x7C, 0x20, 0xFB, 0x21, 0x26, 0xFF, 0x0E,
     0x11, 0x3E, 0x80, 0x32, 0xE2, 0x0C, 0x3E, 0xF3, 0xE2, 0x32, 0x3E, 0x77, 0x77, 0x3E, 0xFC, 0xE0,
@@ -103,11 +98,10 @@ static BIOS: [u8; 0x100] = [
 ];
 
 
-//TODO: Implement Pallet
 //TODO: Implement Tile Map selection
 //TODO: Implement Tile Set selection
 //TODO: Implement enabling and disabling of screen before adding in conition for writing to VRAM
-pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
+pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
     use self::LCDMode::*;
 
 
@@ -119,7 +113,7 @@ pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
         0x4000...0x7FFF => memory.romData[i], //TODO: Implement bank swapping
         0x8000...0x9FFF => {
             //vram can only be properly accessed when not being drawn from
-            if true/*memory.lcdMode != ScanVRAM*/ {
+            if memory.lcdMode != ScanVRAM {
                 memory.videoRAM[i - 0x8000]
             }
             else {
@@ -128,6 +122,15 @@ pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
         }
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000],
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000], //echo of internal RAM 
+        0xFF40 => { //LCD Control
+            let mut control = 0u8;
+
+            //Bit 7 - LCD Enabled
+            control = if memory.isLCDEnabled { control | 0x80} else {control};
+            //TODO: Tile stuff goes here
+
+            control
+        },
         0xFF41 => { //LCD Status
             let mut status = 0;
             status |= memory.lcdMode as u8; //put in lcd mode
@@ -141,7 +144,13 @@ pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
             let mut colorReg = 0;
             
             for i in 0..memory.palette.len() {
-                let color = memory.palette[i] as u8;
+                let color = match memory.palette[i] {
+                    WHITE => 0,
+                    LIGHT_GRAY => 1,
+                    DARK_GRAY => 2,
+                    BLACK => 3,
+                    _ => panic!("Only 4 colors implmented so far...")
+                };
                 colorReg |= color << (i * 2);
 
             }
@@ -155,16 +164,22 @@ pub fn readByteFromMemory(memory: &MemoryState, addr: u16) -> u8 {
 }
 
 
-pub fn writeByteToMemory(memory: &mut MemoryState, byte: u8, addr: u16) {
+pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
     use self::LCDMode::*;
-    use self::LCDPixelColor::*;
 
     let i = addr as usize;
     match addr {
         //vram can only be properly accessed when not being drawn from
-        0x8000...0x9FFF /*if memory.lcdMode != ScanVRAM */=> memory.videoRAM[i - 0x8000] = byte,
+        0x8000...0x9FFF if memory.lcdMode != ScanVRAM => memory.videoRAM[i - 0x8000] = byte,
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
+        0xFF40 => { //LCD Control
+
+            //Bit 7 - LCD Enabled
+            memory.isLCDEnabled = if (byte & 0x80) != 0 {true} else {false};
+            //TODO: Tile stuff goes here
+
+        },
         0xFF42 => memory.lcdSCY = byte,
         0xFF43 => memory.lcdSCX = byte,
         0xFF44 => memory.currScanLine = 0, //resets the current line if written to
@@ -173,10 +188,10 @@ pub fn writeByteToMemory(memory: &mut MemoryState, byte: u8, addr: u16) {
                 let colorNum = (byte >> 2 * i) & 3; 
 
                 memory.palette[i] = match colorNum {
-                    0 => White,
-                    1 => Light,
-                    2 => Dark,
-                    3 => Black,
+                    0 => WHITE,
+                    1 => LIGHT_GRAY,
+                    2 => DARK_GRAY,
+                    3 => BLACK,
                     _ => panic!("Only 4 colors available.  Bad color: {}", colorNum)
                 };
             }
@@ -189,14 +204,14 @@ pub fn writeByteToMemory(memory: &mut MemoryState, byte: u8, addr: u16) {
     }
 }
 
-pub fn readWordFromMemory(memory: &MemoryState, addr: u16) -> u16 {
+pub fn readWordFromMemory(memory: &MemoryMapState, addr: u16) -> u16 {
     debug_assert!(addr + 1 > addr); //check for overflow
 
     ((readByteFromMemory(memory, addr+1) as u16) << 8)  | 
         readByteFromMemory(memory, addr) as u16  
 }
 
-pub fn writeWordToMemory(memory: &mut MemoryState, word: u16, addr: u16 ) {
+pub fn writeWordToMemory(memory: &mut MemoryMapState, word: u16, addr: u16 ) {
     debug_assert!(addr + 1 > addr); //check for overflow
 
     writeByteToMemory(memory, lb(word), addr);
@@ -227,7 +242,7 @@ mod tests {
 
         assert!(romData.len() == 0x8000); //type 0 carts are 32kb long
 
-        let mut memory = MemoryState::new();
+        let mut memory = MemoryMapState::new();
         memory.romData = romData;
 
         assert!(readByteFromMemory(&memory,0) == 0x31); //reading from bios
@@ -273,7 +288,7 @@ mod tests {
         };
         assert!(romData.len() == 0x8000); //type 0 carts are 32kb long
 
-        let mut memory = MemoryState::new();
+        let mut memory = MemoryMapState::new();
         memory.romData = romData;
 
 
@@ -300,7 +315,7 @@ mod tests {
     
     #[test]
     fn testBIOSControls() {
-        let mut mem = MemoryState::new();
+        let mut mem = MemoryMapState::new();
         mem.inBios = true;
 
         //test bios 
@@ -315,7 +330,7 @@ mod tests {
 
     #[test]
     fn testLCDControls() {
-        let mut mem = MemoryState::new();
+        let mut mem = MemoryMapState::new();
 
         //test scanline 
         mem.currScanLine = 133;
@@ -327,7 +342,7 @@ mod tests {
 
     #[test]
     fn testLCDStatus() {
-        let mut mem = MemoryState::new();
+        let mut mem = MemoryMapState::new();
 
         mem.lcdMode = VBlank;
         assert_eq!(readByteFromMemory(&mem,0xFF41), 1); //should be VBlank
@@ -338,12 +353,29 @@ mod tests {
     
     #[test]
     fn testLCDScrollReg() {
-        let mut mem = MemoryState::new();
+        let mut mem = MemoryMapState::new();
 
-        mem.lcdSCY = 32;
-        mem.lcdSCX = 16;
+        writeByteToMemory(&mut mem, 32,0xFF42); //SCY
+        writeByteToMemory(&mut mem, 16,0xFF43); //SCX
+
+        assert_eq!(mem.lcdSCY, 32);
+        assert_eq!(mem.lcdSCX, 16);
         assert_eq!(readByteFromMemory(&mem,0xFF42), 32); //SCY
         assert_eq!(readByteFromMemory(&mem,0xFF43), 16); //SCX
+
+
+    }
+   
+    #[test]
+    fn testPalette() {
+        let mut mem = MemoryMapState::new();
+
+
+        writeByteToMemory(&mut mem, 0xE7, 0xFF47); 
+
+        assert_eq!(mem.palette, [BLACK, LIGHT_GRAY, DARK_GRAY, BLACK]);
+
+        assert_eq!(readByteFromMemory(&mem,0xFF47), 0xE7); 
 
 
     }

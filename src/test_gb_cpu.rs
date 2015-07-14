@@ -17,8 +17,8 @@ use gb_memory::*;
 use gb_cpu::Flag::*;
 static MBC0_ROM : &'static str = "samples/mbc0.gb";
 
-fn tetrisMemoryState() -> MemoryState{
-    let mut mem = MemoryState::new();
+fn tetrisMemoryMapState() -> MemoryMapState{
+    let mut mem = MemoryMapState::new();
 
     let romData = match openROM(MBC0_ROM) {
         Ok(data) => data,
@@ -73,9 +73,9 @@ macro_rules! test {
 }
 
 //NOTE(DanB): best for instructions that don't affect flags or require setup in memory
-fn executeInstructionOnClearedState(instruction: u8) -> (CPUState, MemoryState) {
+fn executeInstructionOnClearedState(instruction: u8) -> (CPUState, MemoryMapState) {
     let mut cpu = CPUState::new();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     let(newPC, cyclesTaken) = executeInstruction(instruction, &mut cpu, &mut mem);
     cpu.PC = newPC;
@@ -103,7 +103,7 @@ fn loadImm16() { //0x1
         ($high: ident, $low: ident, $inst: expr) => ({
 
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             mem.workingRAM[1] = 0xBB; //write AABB to memory location 1
             mem.workingRAM[2] = 0xAA;
@@ -143,7 +143,7 @@ fn loadRegIntoMemory() { //0x2, 0x12
         ($destReg: ident, $addrHigh: ident, $addrLow: ident, $inst: expr) => ({
 
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.$destReg = 0xCC;
             cpu.$addrHigh = 0xC0;
@@ -160,7 +160,7 @@ fn loadRegIntoMemory() { //0x2, 0x12
         ($destReg: ident, $addrHigh: ident, $addrLow: ident, $opOnHL: expr, $inst: expr) => ({
 
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.$destReg = 0xCC;
             cpu.$addrHigh = 0xC0;
@@ -198,7 +198,7 @@ fn increment16() { //0x3, 0x13
     macro_rules! testIncrement16 {
         ($highReg: ident, $lowReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.$highReg = 0x0C;
             cpu.$lowReg = 0xFF;
@@ -228,7 +228,7 @@ fn increment8() { //0x4, 0xC, 0x14, 0x1C
         ($reg: ident, $instr: expr) => ({
 
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
 
             //test half carry and zero set
@@ -248,7 +248,7 @@ fn increment8() { //0x4, 0xC, 0x14, 0x1C
             //test half carry and zero clear
 
             cpu = testingCPU();
-            mem = tetrisMemoryState();
+            mem = tetrisMemoryMapState();
             cpu.$reg = 0x1;
 
             let (newPC, cyclesTaken) = executeInstruction($instr, &mut cpu, &mut mem);
@@ -286,7 +286,7 @@ fn decrement8() { //0x5, 0xD, 0x15
         ($reg: ident, $instr: expr) => ({
 
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             //test half carry set
             cpu.$reg = 0;
@@ -305,7 +305,7 @@ fn decrement8() { //0x5, 0xD, 0x15
             //test zero set
 
             cpu = testingCPU();
-            mem = tetrisMemoryState();
+            mem = tetrisMemoryMapState();
             cpu.$reg = 0x1;
 
             let (newPC, cyclesTaken) = executeInstruction($instr, &mut cpu, &mut mem);
@@ -338,7 +338,7 @@ fn load8() {//0x6, 0xE, 0x16, 0x1E
     macro_rules! testLoad8 {
         ($reg: ident, $instr: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
             let oldPC = cpu.PC;
 
             writeWordToMemory(&mut mem, 0xAA, cpu.PC+1); //load value
@@ -364,7 +364,7 @@ fn load8() {//0x6, 0xE, 0x16, 0x1E
 #[test]
 fn rlca() { //0x7
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     //test rotate 0
     let (newPC, cyclesTaken) = executeInstruction(0x7, &mut cpu, &mut mem);
@@ -416,7 +416,7 @@ fn rlca() { //0x7
 #[test]
 fn loadSPIntoMemory() {//0x8
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.SP = 0xAAAA;
     writeWordToMemory(&mut mem, 0xDDDD, cpu.PC + 1);
@@ -435,7 +435,7 @@ fn addToHL() { //0x9, 0x19
     macro_rules! testAddToHL {
         ($highReg: ident, $lowReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             //HL has 0x55AA
             cpu.H = 0x55;
@@ -487,7 +487,7 @@ fn addToHL() { //0x9, 0x19
 #[test]
 fn addHLToHL() { //0x29
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     //HL has 0x1077
     cpu.H = 0x10;
@@ -527,7 +527,7 @@ fn addHLToHL() { //0x29
 #[test]
 fn addSPToHL() { //0x39
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     //HL has 0x1077
     cpu.H = 0x10;
@@ -577,7 +577,7 @@ fn loadFromMem8Bit() { //0xA
     macro_rules! testLoadFromMem8 {
         ($destReg: ident, $highAddr: ident, $lowAddr: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             writeByteToMemory(&mut mem, 0xAA, 0xCCDD); //load AA to CCDD
 
@@ -595,7 +595,7 @@ fn loadFromMem8Bit() { //0xA
 
         ($destReg: ident, $highAddr: ident, $lowAddr: ident, $opOnHL: expr, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             writeByteToMemory(&mut mem, 0xAA, 0xCCDD); //load AA to CCDD
 
@@ -631,7 +631,7 @@ fn decrement16() { //0xB, 0x1B
         ($highReg: ident, $lowReg: ident, $inst: expr) => ({
 
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.$highReg = 0x00;
             cpu.$lowReg = 0x00;
@@ -658,7 +658,7 @@ fn decrement16() { //0xB, 0x1B
 fn rotateRight() { //0xF
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     //test rotate 0
     let (newPC, cyclesTaken) = executeInstruction(0xF, &mut cpu, &mut mem);
@@ -716,7 +716,7 @@ fn rotateLeftThroughCarry() { //0x17
     macro_rules! testRLA {
         ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = $regAVal;
 
@@ -775,7 +775,7 @@ fn jumpRelative() { //0x18
     //NOTE(DanB): This mostly tests that the signed conversion works
     fn testJR(uOffset: u8, sOffset: i8) {
         let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
+        let mut mem = tetrisMemoryMapState();
 
 
         //load offset 
@@ -797,7 +797,7 @@ fn jumpRelativeWithCondition() { //0x20
 
     fn testJRC(flag: Flag, shouldBeSet: bool, inst: u8) {
         let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
+        let mut mem = tetrisMemoryMapState();
 
         //should perform jump
         if shouldBeSet {
@@ -846,7 +846,7 @@ fn rotateRightThroughCarry() { //0x1F
     macro_rules! testRRA {
         ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = $regAVal;
 
@@ -906,7 +906,7 @@ fn decimalAdjust() { //0x27
 fn complementA() { //0x2F
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -927,7 +927,7 @@ fn complementA() { //0x2F
 fn loadImm16IntoSP() { //0x31
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     mem.workingRAM[1] = 0xBB; //write AABB to memory location 1
     mem.workingRAM[2] = 0xAA;
@@ -945,7 +945,7 @@ fn loadImm16IntoSP() { //0x31
 fn incrementSP() { //0x33
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.SP = 0xCFFF;
 
@@ -962,7 +962,7 @@ fn incrementSP() { //0x33
 fn decrementSP() { //0x3B
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.SP = 0xD000;
 
@@ -978,7 +978,7 @@ fn decrementSP() { //0x3B
 #[test]
 fn incrementValAtHL() { //0x34
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     //increment value at 0xCCDD
     cpu.H = 0xCC;
@@ -1019,7 +1019,7 @@ fn incrementValAtHL() { //0x34
 #[test]
 fn decrementValAtHL() { //0x35
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     //decrement value at 0xCCDD
     cpu.H = 0xCC;
@@ -1076,7 +1076,7 @@ fn decrementValAtHL() { //0x35
 fn loadImm8ToMemPointedAtHL() { //0x36
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     //decrement value at 0xCCDD
     cpu.H = 0xCC;
@@ -1107,7 +1107,7 @@ fn setCarry() { //0x37
 #[test]
 fn complementCarry() { //0x3F
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.F = 0xF0;  //set all flags
 
@@ -1144,7 +1144,7 @@ fn load8BitReg() { //0x40 - 0x7F
         ($dest: ident, $src: ident, $instr: expr) => ({
 
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.$src = 0xAA;
 
@@ -1164,7 +1164,7 @@ fn load8BitReg() { //0x40 - 0x7F
         ($dest: ident, $instr: expr) => ({
 
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.H = 0xCC;
             cpu.L = 0xDD;
@@ -1186,7 +1186,7 @@ fn load8BitReg() { //0x40 - 0x7F
         ($src: ident, $instr: expr) => ({
 
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.H = 0xCC;
             cpu.L = 0xCC;
@@ -1291,7 +1291,7 @@ fn add8Bit() { //0x80-0x85
         //add registers
         ($srcReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
 
@@ -1361,7 +1361,7 @@ fn add8Bit() { //0x80-0x85
 fn add8BitFromMemAtHL() { //0x86
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -1425,7 +1425,7 @@ fn add8BitFromMemAtHL() { //0x86
 fn add8BitFromMem() { //0xC6
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -1484,7 +1484,7 @@ fn add8BitFromMem() { //0xC6
 fn addAtoA() { //0x87
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0x66;
 
@@ -1542,7 +1542,7 @@ fn addCarry8BitFromRegister() { //0x88-0x8D
         //add registers
         ($srcReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
 
@@ -1616,7 +1616,7 @@ fn addCarry8BitFromRegister() { //0x88-0x8D
 fn addCarry8BitFromMemAtHL() { //0x8E
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -1682,7 +1682,7 @@ fn addCarry8BitFromMemAtHL() { //0x8E
 fn addCarry8BitFromMem() { //0xCE
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -1744,7 +1744,7 @@ fn addCarry8BitFromMem() { //0xCE
 fn addCarryAtoA() { //0x8F
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0x66;
 
@@ -1803,7 +1803,7 @@ fn sub8Bit() { //0x90-0x95
         //add registers
         ($srcReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
 
@@ -1879,7 +1879,7 @@ fn sub8BitFromMemAtHL() { //0x96
 
  
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
 
@@ -1945,7 +1945,7 @@ fn sub8BitFromMem() { //0x96
 
  
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
             
@@ -2008,7 +2008,7 @@ fn subAFromA() { //0x97
 
    
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
             //AA - AA = 0
@@ -2034,7 +2034,7 @@ fn subCarry8Bit() { //0x98-0x9D
         //add registers
         ($srcReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             //Make sure that we subtract carry
             setFlag(Carry, &mut cpu.F);
@@ -2110,7 +2110,7 @@ fn subCarry8BitFromMemAtHL() { //0x9E
 
  
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
 
@@ -2173,7 +2173,7 @@ fn subCarry8BitFromMem() { //0xDE
 
  
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
 
@@ -2233,7 +2233,7 @@ fn subCarryAFromA() { //0x9F
 
    
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             //Make sure that adding carry works
             setFlag(Carry, &mut cpu.F);
@@ -2261,7 +2261,7 @@ fn andRegToA() {
     macro_rules! testAnd {
         ($srcReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
 
@@ -2315,7 +2315,7 @@ fn andRegToA() {
 fn andMemAtHLToA() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -2365,7 +2365,7 @@ fn andMemAtHLToA() {
 fn andMemToA() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -2410,7 +2410,7 @@ fn andMemToA() {
 fn andAToA() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -2450,7 +2450,7 @@ fn xorRegToA() {
     macro_rules! testXOR {
         ($srcReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
 
@@ -2504,7 +2504,7 @@ fn xorRegToA() {
 fn xorMemAtHLToA() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -2555,7 +2555,7 @@ fn xorMemAtHLToA() {
 fn xorMemToA() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -2597,7 +2597,7 @@ fn xorMemToA() {
 fn xorAToA() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -2622,7 +2622,7 @@ fn orRegToA() {
     macro_rules! testOR {
         ($srcReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
 
             //0 | 0 = 0
@@ -2672,7 +2672,7 @@ fn orRegToA() {
 fn orMemAtHLToA() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0;
 
@@ -2722,7 +2722,7 @@ fn orMemAtHLToA() {
 fn orMemLToA() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0;
 
@@ -2772,7 +2772,7 @@ fn orMemLToA() {
 fn orAToA() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -2798,7 +2798,7 @@ fn compare8Bit() { //0xB8-0xBD
         //add registers
         ($srcReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.A = 0xAA;
 
@@ -2875,7 +2875,7 @@ fn compare8BitFromMemAtHL() { //0xBE
 
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -2941,7 +2941,7 @@ fn compare8BitFromMem() { //0xFE
 
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -3004,7 +3004,7 @@ fn compareAToA() { //0xBF
 
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -3027,7 +3027,7 @@ fn compareAToA() { //0xBF
 fn callAndReturn() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     let oldPC = cpu.PC;
 
@@ -3055,7 +3055,7 @@ fn restart() {
     macro_rules! testRestart {
         ($resetAddress: expr, $inst:expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             let oldPC = cpu.PC;
 
@@ -3084,7 +3084,7 @@ fn returnFromProcConditional() {
 
     fn testRET(flag: Flag, shouldBeSet: bool, inst: u8) {
         let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
+        let mut mem = tetrisMemoryMapState();
 
         let mut oldPC = cpu.PC;
 
@@ -3148,7 +3148,7 @@ fn callConditional() {
 
     fn testCALL(flag: Flag, shouldBeSet: bool, inst: u8) {
         let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
+        let mut mem = tetrisMemoryMapState();
 
         let oldPC = cpu.PC;
 
@@ -3199,7 +3199,7 @@ fn pop16() {
     macro_rules! testPop16 {
         ($highReg: ident, $lowReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             writeWordToMemory(&mut mem, 0xAABB, 0xCCD0);
             cpu.SP = 0xCCD0;
@@ -3225,7 +3225,7 @@ fn push16() {
     macro_rules! testPush16 {
         ($highReg: ident, $lowReg: ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             cpu.SP = 0xCCD0;
 
@@ -3257,7 +3257,7 @@ fn jumpAbsoluteConditional() {
 
     fn testJRC(flag: Flag, shouldBeSet: bool, inst: u8) {
         let mut cpu = testingCPU();
-        let mut mem = tetrisMemoryState();
+        let mut mem = tetrisMemoryMapState();
 
         //should perform jump
         if shouldBeSet {
@@ -3304,7 +3304,7 @@ fn jumpAbsoluteConditional() {
 #[test]
 fn jumpAbsolute() {
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     writeWordToMemory(&mut mem, 0xAABB, cpu.PC+1);
     
@@ -3317,7 +3317,7 @@ fn jumpAbsolute() {
 #[test]
 fn loadAIntoHighMem() { //E0
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -3334,7 +3334,7 @@ fn loadAIntoHighMem() { //E0
 #[test]
 fn loadAIntoHighMemAtC() { //E2
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -3352,7 +3352,7 @@ fn loadAIntoHighMemAtC() { //E2
 fn addToSPSigned() { //E8
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     let oldSP = cpu.SP;
 
@@ -3388,7 +3388,7 @@ fn addToSPSigned() { //E8
 #[test]
 fn jumpUsingHL() {//E9
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.H = 0xAA;
     cpu.L = 0xBB;
@@ -3404,7 +3404,7 @@ fn jumpUsingHL() {//E9
 #[test]
 fn loadAIntoMem() { //EA
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -3421,7 +3421,7 @@ fn loadAIntoMem() { //EA
 #[test]
 fn loadHighMemIntoA() { //F0
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
 
     writeByteToMemory(&mut mem, 0xBB, cpu.PC+1); 
@@ -3440,7 +3440,7 @@ fn loadHighMemIntoA() { //F0
 #[test]
 fn loadHighMemAtCIntoA() { //F2
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.C = 0xBB;
 
@@ -3463,7 +3463,7 @@ fn disableInterrupts() {
 fn loadSPPlusImmIntoSP() { //F8
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.SP = 0xFF00;
     writeByteToMemory(&mut mem, -2i8 as u8, cpu.PC+1);
@@ -3498,7 +3498,7 @@ fn loadSPPlusImmIntoSP() { //F8
 #[test]
 fn loadHLIntoSP() { //F9
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.H = 0xAA;
     cpu.L = 0xBB;
@@ -3513,7 +3513,7 @@ fn loadHLIntoSP() { //F9
 #[test]
 fn loadMemIntoA() { //FA
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
     cpu.A = 0xAA;
 
@@ -3538,7 +3538,7 @@ fn rotateLeftCB() { //0xCB00-0xCB07
     macro_rules! testRLC {
         ($reg:ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
 
             writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
@@ -3606,7 +3606,7 @@ fn rotateLeftCB() { //0xCB00-0xCB07
 fn rotateLeftCBAtHL() {
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
 
     writeByteToMemory(&mut mem, 6, cpu.PC + 1);
@@ -3668,7 +3668,7 @@ fn rotateRightCB() { //CB08 - CB0D and CB0F
     macro_rules! testRRC {
         ($reg:ident, $inst: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
 
             writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
@@ -3736,7 +3736,7 @@ fn rotateRightCB() { //CB08 - CB0D and CB0F
 fn rotateRightCBAtHL() {//E
 
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
 
     writeByteToMemory(&mut mem, 0xE, cpu.PC + 1);
@@ -3798,7 +3798,7 @@ fn rotateLeftThroughCarryCB() { //CB10 - CB15 and CB17
     macro_rules! testRLA {
         ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr, $reg:ident, $inst:expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
 
@@ -3869,7 +3869,7 @@ fn rotateLeftThroughCarryAtHLCB() { //CB16
     macro_rules! testRLA {
         ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             writeByteToMemory(&mut mem, 0x16, cpu.PC+1);
             writeByteToMemory(&mut mem, $regAVal, 0xCCBB);
@@ -3934,7 +3934,7 @@ fn rotateRightThroughCarryCB() { //CB18 - CB1D and CB1F
     macro_rules! testRR {
         ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr, $reg:ident, $inst:expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
 
@@ -4006,7 +4006,7 @@ fn rotateRightThroughCarryAtHLCB() { //CB1E
     macro_rules! testRR {
         ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryState();
+            let mut mem = tetrisMemoryMapState();
 
             writeByteToMemory(&mut mem, 0x1E, cpu.PC+1);
             writeByteToMemory(&mut mem, $regAVal, 0xCCBB);
@@ -4071,7 +4071,7 @@ fn rotateRightThroughCarryAtHLCB() { //CB1E
 #[test]
 fn cbInstructions() {
     let mut cpu = testingCPU();
-    let mut mem = tetrisMemoryState();
+    let mut mem = tetrisMemoryMapState();
 
 
     //inner scope for macros to work
