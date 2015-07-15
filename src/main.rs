@@ -291,10 +291,11 @@ fn main() {
 
                             //find the tile based on the tile reference
                             let mut tileAddr = match mem.backgroundTileSet {
-                                0 => (tileRef as usize) * 16usize, 
-                                  1 => (0x1000i16 + ((tileRef as i8 as i16) * 16)) as usize, //signed addition
-                                  _ => panic!("Uh oh, the tile set should only be 0 or 1")
+                                0 => (0x1000i16 + ((tileRef as i8 as i16) * 16)) as usize, //signed addition
+                                1 => (tileRef as usize) * 16usize, 
+                                _ => panic!("Uh oh, the tile set should only be 0 or 1")
                             };
+
 
                             //since we already found the correct tile, we only need the last 3 bits of the 
                             //y-scroll register to determine where in the tile we start
@@ -404,6 +405,7 @@ fn main() {
             sleep(secsToSleep).unwrap();
         }
 
+        //TODO: clock speed and fps lag one frame behind
         let secsElapsed = secondsForCountRange(start, get_performance_counter());
         let hz = batchCycles as f32 / secsElapsed;
         mhz = hz / 1000000f32;

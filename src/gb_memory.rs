@@ -100,7 +100,6 @@ static BIOS: [u8; 0x100] = [
 
 //TODO: Implement Tile Map selection
 //TODO: Implement Tile Set selection
-//TODO: Implement enabling and disabling of screen before adding in conition for writing to VRAM
 pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
     use self::LCDMode::*;
 
@@ -129,6 +128,10 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
             control = if memory.isLCDEnabled { control | 0x80} else {control};
             //TODO: Tile stuff goes here
 
+            //Bit 4 - Background Tile Set Select
+            control |= memory.backgroundTileSet << 4;
+            //Bit 3 - Background Tile Data Select
+            control |= memory.backgroundTileMap << 3;
             control
         },
         0xFF41 => { //LCD Status
@@ -177,7 +180,11 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
 
             //Bit 7 - LCD Enabled
             memory.isLCDEnabled = if (byte & 0x80) != 0 {true} else {false};
-            //TODO: Tile stuff goes here
+            
+            //Bit 4 - Background Tile Set Select
+            memory.backgroundTileSet = (byte >> 4) & 1;
+            //Bit 3 - Background Tile Map Select
+            memory.backgroundTileMap = (byte >> 3) & 1;
 
         },
         0xFF42 => memory.lcdSCY = byte,
@@ -329,7 +336,7 @@ mod tests {
 
 
     #[test]
-    fn testLCDControls() {
+    fn testLCDScanLine() {
         let mut mem = MemoryMapState::new();
 
         //test scanline 
@@ -379,6 +386,24 @@ mod tests {
 
 
     }
+
+
+    #[test]
+    fn testLCDControlRegister() {
+        let mut mem = MemoryMapState::new();
+
+        assert_eq!(mem.backgroundTileMap, 0);
+        assert_eq!(mem.backgroundTileSet, 0);
+
+        writeByteToMemory(&mut mem, 0x18, 0xFF40);
+
+        assert_eq!(mem.backgroundTileMap, 1);
+        assert_eq!(mem.backgroundTileSet, 1);
+
+        assert_eq!(readByteFromMemory(&mem,0xFF40), 0x18); 
+    }
+
+
 
 }
 
