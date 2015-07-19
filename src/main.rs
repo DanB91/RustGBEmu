@@ -11,10 +11,12 @@ extern crate errno;
 
 mod gb_memory;
 mod gb_cpu;
+mod gb_util;
 mod sdl2_ttf;
 
 use std::env;
 use std::path::Path;
+use std::mem::swap; 
 
 use libc::funcs::posix88::unistd::usleep;
 use libc::consts::os::posix88::EINTR;
@@ -24,7 +26,9 @@ use errno::*;
 use gb_memory::*;
 use gb_cpu::*;
 
-use sdl2::render::Renderer;
+use gb_util::*;
+
+//use sdl2::render::Renderer;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::timer::{get_performance_counter, get_performance_frequency};
@@ -96,7 +100,7 @@ fn secondsForCountRange(start: u64, end: u64) -> f32 {
 
 fn sleep(secsToSleep: f32) -> Result<(), String> {
     //NOTE(DanB): .005 denotes the amount we will spin manually since
-    //      nanosleep is not 100% accurate 
+    //      usleep is not 100% accurate 
 
     let start = get_performance_counter();
     let newSecsToSleep = secsToSleep - 0.005f32;
@@ -134,9 +138,63 @@ fn sleep(secsToSleep: f32) -> Result<(), String> {
 
 }
 
+//Used to tell whether a Game Boy button is up or down 
+#[derive(PartialEq, Copy, Clone)]
+enum ButtonState {
+    Up, //Key is unpressed
+    Down //Key is currently held down
+}
+
+
+struct GameBoyState {
+    pub cpu: CPUState,
+    pub mem: MemoryMapState,
+    pub lcdScreen: LCDScreen,
+    pub lcdScreenBackBuffer: LCDScreen,
+}
+
+impl GameBoyState {
+    fn new() -> GameBoyState {
+
+        GameBoyState {
+            cpu: CPUState::new(),
+            mem: MemoryMapState::new(),
+
+            lcdScreen: BLANK_SCREEN,
+            lcdScreenBackBuffer: BLANK_SCREEN,
+
+        }
+    }
+}
+
+struct ProgramState {
+
+    fps: f32,
+    shouldDisplayDebug: bool,
+    isPaused: bool,
+    isRunning: bool,
+    mhz: f32,
+
+    gb: GameBoyState,
+}
+
+impl ProgramState {
+    fn new() -> ProgramState {
+        ProgramState {
+            fps: 0.,
+            shouldDisplayDebug: false,
+            isPaused: false,
+            isRunning: true,
+            mhz: 0.,
+
+            gb: GameBoyState::new()
+        }
+    }
+}
 
 //TODO(DanB): Handle unwrap
 fn main() {
+
 
     //parse cmd args
     let fileName = match getROMFileName() {
@@ -154,14 +212,12 @@ fn main() {
         Err(err) => panic!("{}", err)
     };
 
-    let mut cpu = CPUState::new();
-    let mut mem = MemoryMapState::new();
-    let mut lcdScreen = [[WHITE;160];144];
+    let mut prg = ProgramState::new();
+    let mut gb = &mut prg.gb;
+    
 
-    mem.romData = romData;
+    gb.mem.romData = romData;
 
-    let mut isRunning = true;
-    let mut mhz = 0f32;
 
     //init SDL 
     let mut sdlContext = sdl2::init().video().events().unwrap();
@@ -170,13 +226,8 @@ fn main() {
     let mut renderer = window.renderer().build().unwrap();
     let font =  Font::from_file(Path::new(FONT_PATH_STR), 12).unwrap();
 
-
-    let mut fps = 0f32;
-
-    let mut shouldDisplayDebug = false;
-
     //main loop
-    while isRunning {
+    while prg.isRunning {
 
         let start = get_performance_counter();
 
@@ -184,168 +235,60 @@ fn main() {
         for event in sdlContext.event_pump().poll_iter() {
 
             match event {
-                Event::Quit{..} => isRunning = false,
-                Event::KeyDown{keycode: keyOpt, ..} => {
+                Event::Quit{..} => prg.isRunning = false,
+                Event::KeyDown{keycode: keyOpt, repeat: isRepeat, ..} => {
                     match keyOpt {
                         Some(key) => {
-
-                            if key == Keycode::D {
-                                shouldDisplayDebug = !shouldDisplayDebug;
+                            match key {
+                                Keycode::D => {
+                                    if !isRepeat {
+                                        prg.shouldDisplayDebug = !prg.shouldDisplayDebug;
+                                    }
+                                }
+                                
+                                Keycode::P => {
+                                    if !isRepeat {
+                                        prg.isPaused = !prg.isPaused;
+                                    }
+                                }
+                                _ => {}
                             }
-                        },
+                        }
+
                         None => {}
                     }
-                }
+                },
+
                 _ => {}
             }   
+
         }
 
-
-        //run several thousand game boy cycles or so 
         let mut batchCycles = 0u32;
 
-        //one Game Boy "step" per iteration
-        while batchCycles < CYCLES_PER_SLEEP{
-            //step CPU
-            let instructionToExecute = readByteFromMemory(&mut mem, cpu.PC);
+        //------------------------step emulator-------------------------------
+        if !prg.isPaused {
+            //run several thousand game boy cycles or so 
+            while batchCycles < CYCLES_PER_SLEEP{
+                stepCPU(&mut gb);
 
-            let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, &mut cpu, &mut mem); 
-            cpu.PC = newPC;
-            cpu.instructionCycles = cyclesTaken;
-            cpu.totalCycles.wrapping_add(cyclesTaken);
-
-            //step GPU
-            if mem.isLCDEnabled {
-                mem.lcdModeClock += cyclesTaken;
-                match mem.lcdMode {
-
-                    HBlank if mem.lcdModeClock >= 204 => {
-                        mem.lcdModeClock = 0;
-                        mem.currScanLine += 1;
-
-                        //at the last line, engage VBlank and draw SDL screen
-                        if mem.currScanLine == 143 {
-                            mem.lcdMode = VBlank;
-                        }
-                        else {
-                            mem.lcdMode = ScanOAM;
-                        }
-                    },
-
-                    VBlank if mem.lcdModeClock >= 456 => {
-                        mem.currScanLine += 1;
-                        mem.lcdModeClock = 0;
-
-                        if mem.currScanLine == 153 {
-                            mem.lcdMode = ScanOAM;
-                            mem.currScanLine = 0;
-
-                        }
-                    },
-
-                    ScanOAM if mem.lcdModeClock >= 80 => {
-                        //TODO: Draw OAM to internal screen buffer
-
-
-                        mem.lcdMode = ScanVRAM;
-                        mem.lcdModeClock = 0;
-                    },
-
-                    ScanVRAM if mem.lcdModeClock >= 172 => {
-                        //TODO: Draw VRAM to internal screen buffer
-
-                        let y = mem.lcdSCY.wrapping_add(mem.currScanLine);
-
-                        let mut tileRefAddr = match mem.backgroundTileMap {
-                            0 => 0x1800usize,  //it is 0x1800 instead of 0x9800 because this is relative to start of vram
-                              1 => 0x1C00usize,
-                              _ => panic!("Uh oh, the tile map should only be 0 or 1")
-                        };
-
-                        /* Tile Map:
-                         *
-                         * Each "row" is 32 bytes long where each byte is a tile reference
-                         * Each byte represents a 8x8 pixel tils, so each row and column are 256 pixels long
-                         * Each byte represents a 16 byte tile where every 2 bytes represents an 8 pixel row
-                         *
-                         *------------------------------------------------------
-                         *|tile ref | tile ref | ...............................
-                         *|-----------------------------------------------------
-                         *|tile ref | tile ref | ...............................
-                         *|.
-                         *|.
-                         *|.
-                         */
-                        tileRefAddr += (y as usize / 8) * 32; //which tile in the y dimension?
-
-                        let tileRefRowStart = tileRefAddr; // start of the row in the 32x32 tile map
-
-                        tileRefAddr += mem.lcdSCX as usize / 8; //which tile in x dimension?
-
-                        //the x pixel is gotten by shifting a mask of the form 100000
-                        let mut xMask = 0x80u8 >> (mem.lcdSCX & 7);
-
-                        for x in 0..160 {
-
-                            let tileRef = mem.videoRAM[tileRefAddr];
-
-                            //find the tile based on the tile reference
-                            let mut tileAddr = match mem.backgroundTileSet {
-                                0 => (0x1000i16 + ((tileRef as i8 as i16) * 16)) as usize, //signed addition
-                                1 => (tileRef as usize) * 16usize, 
-                                _ => panic!("Uh oh, the tile set should only be 0 or 1")
-                            };
-
-
-                            //since we already found the correct tile, we only need the last 3 bits of the 
-                            //y-scroll register to determine where in the tile we start
-                            tileAddr += ((y & 7) as usize) * 2;
-
-                            let highBit = if (mem.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
-                            let lowBit = if (mem.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
-
-                            let color = mem.palette[((highBit * 2) + lowBit) as usize];
-
-                            //after all this shit, finally draw the pixel
-                            lcdScreen[mem.currScanLine as usize][x as usize] = color; 
-
-                            //update xMask and tile reference appropriately if we are at the end of a tile
-                            match xMask {
-                                1 => {
-                                    xMask = 0x80;
-                                    //the mod 32 makes sure we wrap around to the beginning of the tile map row,
-                                    //if need be
-                                    tileRefAddr = tileRefRowStart + ((tileRefAddr + 1) % 32);
-                                },
-                                _ => xMask >>= 1
-                            };
-
-                        }
-
-
-
-                        mem.lcdMode = HBlank;
-                        mem.lcdModeClock = 0;
-
-                    },
-
-                    _ => {} //do nothing
-                }
-            }
-
-            batchCycles += cpu.instructionCycles;
+                stepLCD(&mut gb);
+                batchCycles += gb.cpu.instructionCycles;
+            } 
         }
 
+
+        //--------------------draw screen-----------------------------------
         renderer.clear();
 
         //draw clear screen if lcd is disabled
-        if mem.isLCDEnabled {        
+        if gb.mem.isLCDEnabled {        
 
             //draw LCD screen
             let mut x = 0u32;
             let mut y  = 0u32;
 
-            for row in &lcdScreen[..] {
+            for row in &gb.lcdScreen[..] {
                 for color in &row[..] {
 
                     renderer.set_draw_color(*color);
@@ -365,26 +308,26 @@ fn main() {
         }
 
         //display Game Boy debug stats
-        if shouldDisplayDebug { 
+        if prg.shouldDisplayDebug { 
             let toPrint: String;
 
-            let mut instructionToPrint = readByteFromMemory(&mut mem, cpu.PC) as u16;
+            let mut instructionToPrint = readByteFromMemory(&mut gb.mem, gb.cpu.PC) as u16;
 
             if instructionToPrint == 0xCB {
-                instructionToPrint =  word(0xCBu8, readByteFromMemory(&mut mem, cpu.PC.wrapping_add(1)))
+                instructionToPrint =  word(0xCBu8, readByteFromMemory(&mut gb.mem, gb.cpu.PC.wrapping_add(1)))
             }
 
             //print debug details
             toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
                               format!("Opcode:{:X}", instructionToPrint),
-                              format!("Total Cycles: {}, Cycles just executed: {}", cpu.totalCycles, cpu.instructionCycles),
-                              format!("Mhz {:.*}", 2, mhz),
-                              format!("Currently in BIOS: {}", mem.inBios),
-                              format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, cpu.F), isFlagSet(Flag::Neg, cpu.F), isFlagSet(Flag::Half, cpu.F), isFlagSet(Flag::Carry, cpu.F)),
-                              format!("PC: {:X}\tSP: {:X}", cpu.PC, cpu.SP),
-                              format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", cpu.A, cpu.F, cpu.B, cpu.C),
-                              format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", cpu.D, cpu.E, cpu.H, cpu.L),
-                              format!("FPS: {}", fps));
+                              format!("Total Cycles: {}, Cycles just executed: {}", gb.cpu.totalCycles, gb.cpu.instructionCycles),
+                              format!("Mhz {:.*}", 2, prg.mhz),
+                              format!("Currently in BIOS: {}", gb.mem.inBios),
+                              format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, gb.cpu.F), isFlagSet(Flag::Neg, gb.cpu.F), isFlagSet(Flag::Half, gb.cpu.F), isFlagSet(Flag::Carry, gb.cpu.F)),
+                              format!("PC: {:X}\tSP: {:X}", gb.cpu.PC, gb.cpu.SP),
+                              format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", gb.cpu.A, gb.cpu.F, gb.cpu.B, gb.cpu.C),
+                              format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", gb.cpu.D, gb.cpu.E, gb.cpu.H, gb.cpu.L),
+                              format!("FPS: {}, Emulator Paused: {}", prg.fps, prg.isPaused));
 
 
 
@@ -394,7 +337,7 @@ fn main() {
             let (texW, texH) = { let q = fontTex.query(); (q.width, q.height)};
             renderer.copy(&mut fontTex, None, sdl2::rect::Rect::new(0, 0, texW, texH).unwrap());
         }
-        
+
         renderer.present();
 
         let secsElapsed = secondsForCountRange(start, get_performance_counter());
@@ -405,11 +348,12 @@ fn main() {
             sleep(secsToSleep).unwrap();
         }
 
-        //TODO: clock speed and fps lag one frame behind
+        //TODO: clock speed and prg.fps lag one frame behind
         let secsElapsed = secondsForCountRange(start, get_performance_counter());
         let hz = batchCycles as f32 / secsElapsed;
-        mhz = hz / 1000000f32;
-        fps = 1f32/secsElapsed;
+        prg.mhz = hz / 1000000f32;
+        prg.fps = 1f32/secsElapsed;
+
 
     }
 
@@ -417,6 +361,154 @@ fn main() {
 
     sdl2_ttf::quit();
 
+
+}
+
+fn stepCPU(gb: &mut GameBoyState) {
+    let instructionToExecute = readByteFromMemory(&mut gb.mem, gb.cpu.PC);
+
+    let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, &mut gb.cpu, &mut gb.mem); 
+    gb.cpu.PC = newPC;
+    gb.cpu.instructionCycles = cyclesTaken;
+    gb.cpu.totalCycles.wrapping_add(cyclesTaken);
+
+}
+
+fn stepLCD(gb: &mut GameBoyState) {
+    let mem = &mut gb.mem;
+
+    if mem.isLCDEnabled {
+        
+        //get instruction cycles of last instruction exectued
+        mem.lcdModeClock += gb.cpu.instructionCycles; 
+        
+        match mem.lcdMode {
+
+            HBlank if mem.lcdModeClock >= 204 => {
+                mem.lcdModeClock = 0;
+                mem.currScanLine += 1;
+
+                //at the last line...
+                if mem.currScanLine == 143 {
+                    mem.lcdMode = VBlank; //engage VBlank
+                    swap(&mut gb.lcdScreen, &mut gb.lcdScreenBackBuffer); //commit fully drawn screen
+
+                }
+                else {
+                    mem.lcdMode = ScanOAM;
+                }
+            },
+
+            VBlank if mem.lcdModeClock >= 456 => {
+                mem.currScanLine += 1;
+                mem.lcdModeClock = 0;
+
+                if mem.currScanLine == 153 {
+                    mem.lcdMode = ScanOAM;
+                    mem.currScanLine = 0;
+
+                }
+            },
+
+            ScanOAM if mem.lcdModeClock >= 80 => {
+                //TODO: Draw OAM to internal screen buffer
+
+
+                mem.lcdMode = ScanVRAM;
+                mem.lcdModeClock = 0;
+            },
+
+            ScanVRAM if mem.lcdModeClock >= 172 => {
+                //TODO: Draw VRAM to internal screen buffer
+
+                let y = mem.lcdSCY.wrapping_add(mem.currScanLine);
+
+                //draw background
+                if mem.isBackgroundEnabled {
+                    let mut tileRefAddr = match mem.backgroundTileMap {
+                        0 => 0x1800usize,  //it is 0x1800 instead of 0x9800 because this is relative to start of vram
+                        1 => 0x1C00usize,
+                        _ => panic!("Uh oh, the tile map should only be 0 or 1")
+                    };
+
+                    /* Tile Map:
+                     *
+                     * Each "row" is 32 bytes long where each byte is a tile reference
+                     * Each byte represents a 8x8 pixel tils, so each row and column are 256 pixels long
+                     * Each byte represents a 16 byte tile where every 2 bytes represents an 8 pixel row
+                     *
+                     *------------------------------------------------------
+                     *|tile ref | tile ref | ...............................
+                     *|-----------------------------------------------------
+                     *|tile ref | tile ref | ...............................
+                     *|.
+                     *|.
+                     *|.
+                     */
+                    tileRefAddr += (y as usize / 8) * 32; //which tile in the y dimension?
+
+                    let tileRefRowStart = tileRefAddr; // start of the row in the 32x32 tile map
+
+                    tileRefAddr += mem.lcdSCX as usize / 8; //which tile in x dimension?
+
+                    //the x pixel is gotten by shifting a mask of the form 100000
+                    let mut xMask = 0x80u8 >> (mem.lcdSCX & 7);
+
+                    for x in 0..160 {
+
+                        let tileRef = mem.videoRAM[tileRefAddr];
+
+                        //find the tile based on the tile reference
+                        let mut tileAddr = match mem.backgroundTileSet {
+                            0 => (0x1000i16 + ((tileRef as i8 as i16) * 16)) as usize, //signed addition
+                            1 => (tileRef as usize) * 16usize, 
+                            _ => panic!("Uh oh, the tile set should only be 0 or 1")
+                        };
+
+
+                        //since we already found the correct tile, we only need the last 3 bits of the 
+                        //y-scroll register to determine where in the tile we start
+                        tileAddr += ((y & 7) as usize) * 2;
+
+                        let highBit = if (mem.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
+                        let lowBit = if (mem.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
+
+                        let color = mem.palette[((highBit * 2) + lowBit) as usize];
+
+                        //after all this shit, finally draw the pixel
+                        gb.lcdScreenBackBuffer[mem.currScanLine as usize][x as usize] = color; 
+
+                        //update xMask and tile reference appropriately if we are at the end of a tile
+                        match xMask {
+                            1 => {
+                                xMask = 0x80;
+                                //the mod 32 makes sure we wrap around to the beginning of the tile map row,
+                                //if need be
+                                tileRefAddr = tileRefRowStart + ((tileRefAddr + 1) % 32);
+                            },
+                            _ => xMask >>= 1
+                        };
+
+                    }
+                }
+                //background not enabled
+                else {
+                    for x in 0..160 {
+                        //just draw white
+                        gb.lcdScreenBackBuffer[mem.currScanLine as usize][x as usize] = WHITE; 
+                    }
+                }
+
+
+
+                mem.lcdMode = HBlank;
+                mem.lcdModeClock = 0;
+
+            },
+
+            _ => {} //do nothing
+        }
+    }
 
 }
 

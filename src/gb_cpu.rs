@@ -4,6 +4,7 @@
  */
 
 use gb_memory::*;
+use gb_util::*;
 
 pub const CLOCK_SPEED_HZ: f32 = 4194304f32;
 
