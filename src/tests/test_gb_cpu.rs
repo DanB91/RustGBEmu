@@ -42,7 +42,7 @@ static BIOS: [u8; 0x100] = [
 /*
  * I included stripped down versions of read and write word/byte functions since the function
  * signatures will change and I am not testing these functions in this test module.  I am only
- * testing CPU related functions
+ * really testing CPU related functions
  */
 fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
 
@@ -303,12 +303,12 @@ fn increment16() { //0x3, 0x13
 #[test]
 fn increment8() { //0x4, 0xC, 0x14, 0x1C
 
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
 
     macro_rules! testInc8 {
         ($reg: ident, $instr: expr) => ({
 
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
 
             //test half carry and zero set
@@ -327,8 +327,6 @@ fn increment8() { //0x4, 0xC, 0x14, 0x1C
 
             //test half carry and zero clear
 
-            cpu = testingCPU();
-            mem = tetrisMemoryMapState();
             cpu.$reg = 0x1;
 
             let (newPC, cyclesTaken) = executeInstruction($instr, &mut cpu, &mut mem);
@@ -361,12 +359,12 @@ fn increment8() { //0x4, 0xC, 0x14, 0x1C
 #[test]
 fn decrement8() { //0x5, 0xD, 0x15
 
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
     macro_rules! testDec8 {
 
         ($reg: ident, $instr: expr) => ({
 
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
             //test half carry set
             cpu.$reg = 0;
@@ -384,8 +382,6 @@ fn decrement8() { //0x5, 0xD, 0x15
 
             //test zero set
 
-            cpu = testingCPU();
-            mem = tetrisMemoryMapState();
             cpu.$reg = 0x1;
 
             let (newPC, cyclesTaken) = executeInstruction($instr, &mut cpu, &mut mem);
@@ -810,7 +806,7 @@ fn rotateLeftThroughCarry() { //0x17
             assert!(cpu.A == $expectedVal);
 
             assert!(!isFlagSet(Half, cpu.F));
-            
+
             if $expectedVal == 0 {
                 assert!(isFlagSet(Zero, cpu.F));
             }
@@ -947,7 +943,7 @@ fn rotateRightThroughCarry() { //0x1F
             else {
                 assert!(!isFlagSet(Zero, cpu.F));
             }
-            
+
             assert!(!isFlagSet(Neg, cpu.F));
 
             if $isCSet {
@@ -1218,13 +1214,13 @@ fn complementCarry() { //0x3F
 
 #[test]
 fn load8BitReg() { //0x40 - 0x7F
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
 
     //used for register to register loading
     macro_rules! load8BitRegFromReg {
         ($dest: ident, $src: ident, $instr: expr) => ({
 
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
             cpu.$src = 0xAA;
 
@@ -1243,8 +1239,6 @@ fn load8BitReg() { //0x40 - 0x7F
 
         ($dest: ident, $instr: expr) => ({
 
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
             cpu.H = 0xCC;
             cpu.L = 0xDD;
@@ -1265,8 +1259,6 @@ fn load8BitReg() { //0x40 - 0x7F
 
         ($src: ident, $instr: expr) => ({
 
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
             cpu.H = 0xCC;
             cpu.L = 0xCC;
@@ -1889,7 +1881,7 @@ fn sub8Bit() { //0x90-0x95
 
             //Make sure that sub carry is unaffected
             setFlag(Carry, &mut cpu.F);
-            
+
             cpu.$srcReg = 0x11;
 
             //AA - 11 - Carry = 0x98
@@ -1957,153 +1949,153 @@ fn sub8Bit() { //0x90-0x95
 #[test]
 fn sub8BitFromMemAtHL() { //0x96
 
- 
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
-            cpu.A = 0xAA;
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
 
-            cpu.H = 0xCC;
-            cpu.L = 0xDD;
-            
-            //Make sure that setting Carry doesn't affect anything
-            setFlag(Carry, &mut cpu.F);
+    cpu.A = 0xAA;
 
-            writeByteToMemory(&mut mem, 0x11, 0xCCDD);
+    cpu.H = 0xCC;
+    cpu.L = 0xDD;
 
-            //AA - 11 - Carry = 0x98
-            let (newPC, cyclesTaken) = executeInstruction(0x96, &mut cpu, &mut mem);
+    //Make sure that setting Carry doesn't affect anything
+    setFlag(Carry, &mut cpu.F);
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 1);
-            assert!(cpu.A == 0x99);
+    writeByteToMemory(&mut mem, 0x11, 0xCCDD);
 
-            //N flag set
-            assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
+    //AA - 11 - Carry = 0x98
+    let (newPC, cyclesTaken) = executeInstruction(0x96, &mut cpu, &mut mem);
 
-            cpu.A = 0x1;
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 1);
+    assert!(cpu.A == 0x99);
 
-            writeByteToMemory(&mut mem, 0xFF, 0xCCDD);
+    //N flag set
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
 
-            //1 - FF = 2
-            let (newPC, cyclesTaken) = executeInstruction(0x96, &mut cpu, &mut mem);
+    cpu.A = 0x1;
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 1);
-            assert!(cpu.A == 2);
+    writeByteToMemory(&mut mem, 0xFF, 0xCCDD);
 
-            //C, H, N set
-            assert!(isFlagSet(Half, cpu.F));
-            assert!(isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
+    //1 - FF = 2
+    let (newPC, cyclesTaken) = executeInstruction(0x96, &mut cpu, &mut mem);
 
-            cpu.A = 0xAA;
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 1);
+    assert!(cpu.A == 2);
 
-            writeByteToMemory(&mut mem, 0xAA, 0xCCDD);
-            
-            //AA - AA = 0
-            let (newPC, cyclesTaken) = executeInstruction(0x96, &mut cpu, &mut mem);
+    //C, H, N set
+    assert!(isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 1);
-            assert!(cpu.A == 0x0);
+    cpu.A = 0xAA;
 
-            //N, Z set
-            assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Carry, cpu.F));
-            assert!(isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
- 
+    writeByteToMemory(&mut mem, 0xAA, 0xCCDD);
+
+    //AA - AA = 0
+    let (newPC, cyclesTaken) = executeInstruction(0x96, &mut cpu, &mut mem);
+
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 1);
+    assert!(cpu.A == 0x0);
+
+    //N, Z set
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+    assert!(isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+
 }
 
 #[test]
 fn sub8BitFromMem() { //0x96
 
- 
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
-            cpu.A = 0xAA;
-            
-            //Make sure that setting Carry doesn't affect anything
-            setFlag(Carry, &mut cpu.F);
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
 
-            writeByteToMemory(&mut mem, 0x11, cpu.PC +1);
+    cpu.A = 0xAA;
 
-            //AA - 11 - Carry = 0x98
-            let (newPC, cyclesTaken) = executeInstruction(0xD6, &mut cpu, &mut mem);
+    //Make sure that setting Carry doesn't affect anything
+    setFlag(Carry, &mut cpu.F);
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 2);
-            assert!(cpu.A == 0x99);
+    writeByteToMemory(&mut mem, 0x11, cpu.PC +1);
 
-            //N flag set
-            assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
+    //AA - 11 - Carry = 0x98
+    let (newPC, cyclesTaken) = executeInstruction(0xD6, &mut cpu, &mut mem);
 
-            cpu.A = 0x1;
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 2);
+    assert!(cpu.A == 0x99);
 
-            writeByteToMemory(&mut mem, 0xFF, cpu.PC +1);
+    //N flag set
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
 
-            //1 - FF = 2
-            let (newPC, cyclesTaken) = executeInstruction(0xD6, &mut cpu, &mut mem);
+    cpu.A = 0x1;
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 2);
-            assert!(cpu.A == 2);
+    writeByteToMemory(&mut mem, 0xFF, cpu.PC +1);
 
-            //C, H, N set
-            assert!(isFlagSet(Half, cpu.F));
-            assert!(isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
+    //1 - FF = 2
+    let (newPC, cyclesTaken) = executeInstruction(0xD6, &mut cpu, &mut mem);
 
-            cpu.A = 0xAA;
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 2);
+    assert!(cpu.A == 2);
 
-            writeByteToMemory(&mut mem, 0xAA, cpu.PC +1);
-            
-            //AA - AA = 0
-            let (newPC, cyclesTaken) = executeInstruction(0xD6, &mut cpu, &mut mem);
+    //C, H, N set
+    assert!(isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 2);
-            assert!(cpu.A == 0x0);
+    cpu.A = 0xAA;
 
-            //N, Z set
-            assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Carry, cpu.F));
-            assert!(isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
- 
+    writeByteToMemory(&mut mem, 0xAA, cpu.PC +1);
+
+    //AA - AA = 0
+    let (newPC, cyclesTaken) = executeInstruction(0xD6, &mut cpu, &mut mem);
+
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 2);
+    assert!(cpu.A == 0x0);
+
+    //N, Z set
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+    assert!(isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+
 }
 
 #[test]
 fn subAFromA() { //0x97
 
-   
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
-            cpu.A = 0xAA;
-            //AA - AA = 0
-            let (newPC, cyclesTaken) = executeInstruction(0x97, &mut cpu, &mut mem);
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
 
-            assert!(cyclesTaken == 4);
-            assert!(newPC == cpu.PC + 1);
-            assert!(cpu.A == 0x0);
+    cpu.A = 0xAA;
+    //AA - AA = 0
+    let (newPC, cyclesTaken) = executeInstruction(0x97, &mut cpu, &mut mem);
 
-            //N, Z, H set
-            assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Carry, cpu.F));
-            assert!(isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
- 
+    assert!(cyclesTaken == 4);
+    assert!(newPC == cpu.PC + 1);
+    assert!(cpu.A == 0x0);
+
+    //N, Z, H set
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+    assert!(isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+
 }
 
 
@@ -2118,7 +2110,7 @@ fn subCarry8Bit() { //0x98-0x9D
 
             //Make sure that we subtract carry
             setFlag(Carry, &mut cpu.F);
-            
+
             cpu.A = 0xAA;
 
             cpu.$srcReg = 0x11;
@@ -2165,7 +2157,7 @@ fn subCarry8Bit() { //0x98-0x9D
             assert!(newPC == cpu.PC + 1);
             assert!(cpu.A == 0xFF); //Carry is set in previous case
 
-                //N,  H, C set
+            //N,  H, C set
             assert!(isFlagSet(Half, cpu.F));
             assert!(isFlagSet(Carry, cpu.F));
             assert!(!isFlagSet(Zero, cpu.F));
@@ -2188,150 +2180,150 @@ fn subCarry8Bit() { //0x98-0x9D
 #[test]
 fn subCarry8BitFromMemAtHL() { //0x9E
 
- 
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
-            cpu.A = 0xAA;
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
 
-            cpu.H = 0xCC;
-            cpu.L = 0xDD;
+    cpu.A = 0xAA;
 
-            writeByteToMemory(&mut mem, 0x11, 0xCCDD);
+    cpu.H = 0xCC;
+    cpu.L = 0xDD;
 
-            //AA - 11 = 0x99
-            let (newPC, cyclesTaken) = executeInstruction(0x9E, &mut cpu, &mut mem);
+    writeByteToMemory(&mut mem, 0x11, 0xCCDD);
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 1);
-            assert!(cpu.A == 0x99);
+    //AA - 11 = 0x99
+    let (newPC, cyclesTaken) = executeInstruction(0x9E, &mut cpu, &mut mem);
 
-            //N flag set
-            assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 1);
+    assert!(cpu.A == 0x99);
 
-            cpu.A = 0x1;
+    //N flag set
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
 
-            writeByteToMemory(&mut mem, 0xFF, 0xCCDD);
+    cpu.A = 0x1;
 
-            //1 - FF = 2
-            let (newPC, cyclesTaken) = executeInstruction(0x9E, &mut cpu, &mut mem);
+    writeByteToMemory(&mut mem, 0xFF, 0xCCDD);
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 1);
-            assert!(cpu.A == 2);
+    //1 - FF = 2
+    let (newPC, cyclesTaken) = executeInstruction(0x9E, &mut cpu, &mut mem);
 
-            //C, H, N set
-            assert!(isFlagSet(Half, cpu.F));
-            assert!(isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 1);
+    assert!(cpu.A == 2);
 
-            cpu.A = 0xAA;
+    //C, H, N set
+    assert!(isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
 
-            writeByteToMemory(&mut mem, 0xAA, 0xCCDD);
-            
-            //AA - AA - Carry = 0xFF
-            let (newPC, cyclesTaken) = executeInstruction(0x9E, &mut cpu, &mut mem);
+    cpu.A = 0xAA;
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 1);
-            assert!(cpu.A == 0xFF);
+    writeByteToMemory(&mut mem, 0xAA, 0xCCDD);
 
-            //N, C, H set
-            assert!(isFlagSet(Half, cpu.F));
-            assert!(isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
- 
+    //AA - AA - Carry = 0xFF
+    let (newPC, cyclesTaken) = executeInstruction(0x9E, &mut cpu, &mut mem);
+
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 1);
+    assert!(cpu.A == 0xFF);
+
+    //N, C, H set
+    assert!(isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+
 }
 
 #[test]
 fn subCarry8BitFromMem() { //0xDE
 
- 
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
-            cpu.A = 0xAA;
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
 
-            writeByteToMemory(&mut mem, 0x11, cpu.PC + 1);
+    cpu.A = 0xAA;
 
-            //AA - 11 = 0x99
-            let (newPC, cyclesTaken) = executeInstruction(0xDE, &mut cpu, &mut mem);
+    writeByteToMemory(&mut mem, 0x11, cpu.PC + 1);
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 2);
-            assert!(cpu.A == 0x99);
+    //AA - 11 = 0x99
+    let (newPC, cyclesTaken) = executeInstruction(0xDE, &mut cpu, &mut mem);
 
-            //N flag set
-            assert!(!isFlagSet(Half, cpu.F));
-            assert!(!isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 2);
+    assert!(cpu.A == 0x99);
 
-            cpu.A = 0x1;
+    //N flag set
+    assert!(!isFlagSet(Half, cpu.F));
+    assert!(!isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
 
-            writeByteToMemory(&mut mem, 0xFF, cpu.PC + 1);
+    cpu.A = 0x1;
 
-            //1 - FF = 2
-            let (newPC, cyclesTaken) = executeInstruction(0xDE, &mut cpu, &mut mem);
+    writeByteToMemory(&mut mem, 0xFF, cpu.PC + 1);
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 2);
-            assert!(cpu.A == 2);
+    //1 - FF = 2
+    let (newPC, cyclesTaken) = executeInstruction(0xDE, &mut cpu, &mut mem);
 
-            //C, H, N set
-            assert!(isFlagSet(Half, cpu.F));
-            assert!(isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 2);
+    assert!(cpu.A == 2);
 
-            cpu.A = 0xAA;
+    //C, H, N set
+    assert!(isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
 
-            writeByteToMemory(&mut mem, 0xAA, cpu.PC + 1);
-            
-            //AA - AA - Carry = 0xFF
-            let (newPC, cyclesTaken) = executeInstruction(0xDE, &mut cpu, &mut mem);
+    cpu.A = 0xAA;
 
-            assert!(cyclesTaken == 8);
-            assert!(newPC == cpu.PC + 2);
-            assert!(cpu.A == 0xFF);
+    writeByteToMemory(&mut mem, 0xAA, cpu.PC + 1);
 
-            //N, C, H set
-            assert!(isFlagSet(Half, cpu.F));
-            assert!(isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
- 
+    //AA - AA - Carry = 0xFF
+    let (newPC, cyclesTaken) = executeInstruction(0xDE, &mut cpu, &mut mem);
+
+    assert!(cyclesTaken == 8);
+    assert!(newPC == cpu.PC + 2);
+    assert!(cpu.A == 0xFF);
+
+    //N, C, H set
+    assert!(isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+
 }
 
 #[test]
 fn subCarryAFromA() { //0x9F
 
-   
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
-            //Make sure that adding carry works
-            setFlag(Carry, &mut cpu.F);
-            
-            cpu.A = 0xAA;
-            //AA - AA = 0
-            let (newPC, cyclesTaken) = executeInstruction(0x9F, &mut cpu, &mut mem);
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
 
-            assert!(cyclesTaken == 4);
-            assert!(newPC == cpu.PC + 1);
-            assert!(cpu.A == 0xFF);
+    //Make sure that adding carry works
+    setFlag(Carry, &mut cpu.F);
 
-            //N, H, C set
-            assert!(isFlagSet(Half, cpu.F));
-            assert!(isFlagSet(Carry, cpu.F));
-            assert!(!isFlagSet(Zero, cpu.F));
-            assert!(isFlagSet(Neg, cpu.F));
- 
+    cpu.A = 0xAA;
+    //AA - AA = 0
+    let (newPC, cyclesTaken) = executeInstruction(0x9F, &mut cpu, &mut mem);
+
+    assert!(cyclesTaken == 4);
+    assert!(newPC == cpu.PC + 1);
+    assert!(cpu.A == 0xFF);
+
+    //N, H, C set
+    assert!(isFlagSet(Half, cpu.F));
+    assert!(isFlagSet(Carry, cpu.F));
+    assert!(!isFlagSet(Zero, cpu.F));
+    assert!(isFlagSet(Neg, cpu.F));
+
 }
 
 
@@ -2605,7 +2597,7 @@ fn xorMemAtHLToA() {
 
     assert!(!isFlagSet(Half, cpu.F));
     assert!(!isFlagSet(Carry, cpu.F));
-    
+
     //Z set
     assert!(isFlagSet(Zero, cpu.F));
     assert!(!isFlagSet(Neg, cpu.F));
@@ -2650,7 +2642,7 @@ fn xorMemToA() {
 
     assert!(!isFlagSet(Half, cpu.F));
     assert!(!isFlagSet(Carry, cpu.F));
-    
+
     //Z set
     assert!(isFlagSet(Zero, cpu.F));
     assert!(!isFlagSet(Neg, cpu.F));
@@ -2772,7 +2764,7 @@ fn orMemAtHLToA() {
 
     assert!(!isFlagSet(Half, cpu.F));
     assert!(!isFlagSet(Carry, cpu.F));
-    
+
     //Z set
     assert!(isFlagSet(Zero, cpu.F));
     assert!(!isFlagSet(Neg, cpu.F));
@@ -2822,7 +2814,7 @@ fn orMemLToA() {
 
     assert!(!isFlagSet(Half, cpu.F));
     assert!(!isFlagSet(Carry, cpu.F));
-    
+
     //Z set
     assert!(isFlagSet(Zero, cpu.F));
     assert!(!isFlagSet(Neg, cpu.F));
@@ -2884,7 +2876,7 @@ fn compare8Bit() { //0xB8-0xBD
 
             //Make sure that sub carry is unaffected
             setFlag(Carry, &mut cpu.F);
-            
+
             cpu.$srcReg = 0x11;
 
             //AA > 11, C and Z clear
@@ -3100,7 +3092,7 @@ fn compareAToA() { //0xBF
     assert!(!isFlagSet(Carry, cpu.F));
     assert!(isFlagSet(Zero, cpu.F));
     assert!(isFlagSet(Neg, cpu.F));
- 
+
 }
 
 #[test]
@@ -3122,7 +3114,7 @@ fn callAndReturn() {
 
     //execute RET
     let (newPC, cyclesTaken) = executeInstruction(0xC9, &mut cpu, &mut mem);
-    
+
     assert_eq!(newPC, oldPC + 3);
     assert_eq!(readWordFromMemory(&mut mem, cpu.SP), 0);
     assert_eq!(cyclesTaken, 16);
@@ -3131,11 +3123,11 @@ fn callAndReturn() {
 
 #[test]
 fn restart() {
+    let mut cpu = testingCPU();
+    let mut mem = tetrisMemoryMapState();
 
     macro_rules! testRestart {
         ($resetAddress: expr, $inst:expr) => ({
-            let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
             let oldPC = cpu.PC;
 
@@ -3215,7 +3207,7 @@ fn returnFromProcConditional() {
     testRET(Zero, true, 0xC8);
     testRET(Carry, false, 0xD0);
     testRET(Carry, true, 0xD8);
-    
+
 
 }
 
@@ -3294,10 +3286,10 @@ fn pop16() {
         })
     }
 
-   testPop16!(B,C,0xC1); 
-   testPop16!(D,E,0xD1); 
-   testPop16!(H,L,0xE1); 
-   testPop16!(A,F,0xF1); 
+    testPop16!(B,C,0xC1); 
+    testPop16!(D,E,0xD1); 
+    testPop16!(H,L,0xE1); 
+    testPop16!(A,F,0xF1); 
 }
 
 #[test]
@@ -3387,7 +3379,7 @@ fn jumpAbsolute() {
     let mut mem = tetrisMemoryMapState();
 
     writeWordToMemory(&mut mem, 0xAABB, cpu.PC+1);
-    
+
     let (newPC, cyclesTaken) = executeInstruction(0xC3, &mut cpu, &mut mem);
 
     assert_eq!(newPC, 0xAABB);
@@ -3446,7 +3438,7 @@ fn addToSPSigned() { //E8
     assert_eq!(cyclesTaken, 16);
 
     assert_eq!(cpu.F, 0);
-    
+
     cpu.SP = 0xFEF8;
 
     writeByteToMemory(&mut mem, 0x8, cpu.PC+1);
@@ -3475,7 +3467,7 @@ fn jumpUsingHL() {//E9
 
     //jump to 0xAABB
     let (newPC, cyclesTaken) = executeInstruction(0xE9, &mut cpu, &mut mem);
-    
+
     assert_eq!(newPC, 0xAABB);
     assert_eq!(cyclesTaken, 4);
 
@@ -3556,7 +3548,7 @@ fn loadSPPlusImmIntoSP() { //F8
     assert_eq!(cyclesTaken, 12);
 
     assert_eq!(cpu.F, 0);
-    
+
     cpu.SP = 0xFEF8;
 
     writeByteToMemory(&mut mem, 0x8, cpu.PC+1);
@@ -3874,11 +3866,11 @@ fn rotateRightCBAtHL() {//E
 
 #[test]
 fn rotateLeftThroughCarryCB() { //CB10 - CB15 and CB17
+    let mut mem = tetrisMemoryMapState(); //pulled this out so it doesn't overflow stack memory
 
     macro_rules! testRLA {
         ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr, $reg:ident, $inst:expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
             writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
 
@@ -3894,7 +3886,7 @@ fn rotateLeftThroughCarryCB() { //CB10 - CB15 and CB17
             assert!(cpu.$reg == $expectedVal);
 
             assert!(!isFlagSet(Half, cpu.F));
-            
+
             if $expectedVal == 0 {
                 assert!(isFlagSet(Zero, cpu.F));
             }
@@ -3968,7 +3960,7 @@ fn rotateLeftThroughCarryAtHLCB() { //CB16
             assert!(readByteFromMemory(&mut mem, 0xCCBB) == $expectedVal);
 
             assert!(!isFlagSet(Half, cpu.F));
-            
+
             if $expectedVal == 0 {
                 assert!(isFlagSet(Zero, cpu.F));
             }
@@ -4010,11 +4002,11 @@ fn rotateLeftThroughCarryAtHLCB() { //CB16
 
 #[test]
 fn rotateRightThroughCarryCB() { //CB18 - CB1D and CB1F
+    let mut mem = tetrisMemoryMapState(); //pulled this out so it doesn't overflow stack memory
 
     macro_rules! testRR {
         ($regAVal: expr, $expectedVal: expr, $setC: expr, $isCSet: expr, $reg:ident, $inst:expr) => ({
             let mut cpu = testingCPU();
-            let mut mem = tetrisMemoryMapState();
 
             writeByteToMemory(&mut mem, $inst, cpu.PC + 1);
 
@@ -4030,7 +4022,7 @@ fn rotateRightThroughCarryCB() { //CB18 - CB1D and CB1F
             assert!(cpu.$reg == $expectedVal);
 
             assert!(!isFlagSet(Half, cpu.F));
-            
+
             if $expectedVal == 0 {
                 assert!(isFlagSet(Zero, cpu.F));
             }
@@ -4105,7 +4097,7 @@ fn rotateRightThroughCarryAtHLCB() { //CB1E
             assert!(readByteFromMemory(&mut mem, 0xCCBB) == $expectedVal);
 
             assert!(!isFlagSet(Half, cpu.F));
-            
+
             if $expectedVal == 0 {
                 assert!(isFlagSet(Zero, cpu.F));
             }
@@ -4190,7 +4182,7 @@ fn cbInstructions() {
                     6 => readByteFromMemory(&mut mem, 0xCCBB),
                     7 => cpu.A,
                     _ => panic!("Unreachable")
-                
+
                 };
 
 
@@ -4264,8 +4256,8 @@ fn cbInstructions() {
                     //no flags set
                     assert_eq!(0, cpu.F);
                     //----------------------------------------------------------------------
-                    
-                    
+
+
                     //------------------test case 2----------------------------------------
                     //0x1 shifted right is 0
                     storeValue!(1, i);
@@ -4290,7 +4282,7 @@ fn cbInstructions() {
                     //no flags set
                     assert_eq!(0, cpu.F);
                     //----------------------------------------------------------------------
-                   
+
 
                     //-------------------test case 2-----------------------------------------
                     storeValue!(0, i);
@@ -4316,8 +4308,8 @@ fn cbInstructions() {
                     //no flags set
                     assert_eq!(0, cpu.F);
                     //----------------------------------------------------------------------
-                    
-                    
+
+
                     //------------------test case 2----------------------------------------
                     //0x1 shifted right is 0
                     storeValue!(1, i);
@@ -4360,12 +4352,12 @@ fn cbInstructions() {
                             testBit!(0x81, true);
                             testBit!(0x83, false);
                         }
-                        
+
                         0x50...0x57 => {//BIT 2
                             testBit!(0x83, true);
                             testBit!(0x87, false);
                         }
-                        
+
                         0x58...0x5F => {//BIT 3
                             testBit!(0x87, true);
                             testBit!(0x8F, false);
@@ -4380,12 +4372,12 @@ fn cbInstructions() {
                             testBit!(0x90, true);
                             testBit!(0x20, false);
                         }
-                        
+
                         0x70...0x77 => {//BIT 6
                             testBit!(0x20, true);
                             testBit!(0x40, false);
                         }
-                        
+
                         0x78...0x7F => {//BIT 7
                             testBit!(0x40, true);
                             testBit!(0x80, false);
@@ -4415,11 +4407,11 @@ fn cbInstructions() {
                         0x88...0x8F => {//RES 1
                             testResetBit!(0xF3, 0xF1);
                         }
-                        
+
                         0x90...0x97 => {//RES 2
                             testResetBit!(0x44, 0x40);
                         }
-                        
+
                         0x98...0x9F => {//RES 3
                             testResetBit!(0x4C, 0x44);
                         }
@@ -4431,11 +4423,11 @@ fn cbInstructions() {
                         0xA8...0xAF => {//RES 5
                             testResetBit!(0x2C, 0xC);
                         }
-                        
+
                         0xB0...0xB7 => {//RES 6
                             testResetBit!(0x4C, 0xC);
                         }
-                        
+
                         0xB8...0xBF => {//RES 7
                             testResetBit!(0xFC, 0x7C);
                         }
@@ -4444,7 +4436,7 @@ fn cbInstructions() {
                         _ => {}
                     }
                 }
-                
+
                 0xC0...0xFF => { //SET
                     macro_rules! testSetBit {
                         ($initialVal: expr, $result: expr)=>  ({
@@ -4464,11 +4456,11 @@ fn cbInstructions() {
                         0xC8...0xCF => {//SET 1
                             testSetBit!(4, 6);
                         }
-                        
+
                         0xD0...0xD7 => {//SET 2
                             testSetBit!(4, 4);
                         }
-                        
+
                         0xD8...0xDF => {//SET 3
                             testSetBit!(0x7, 0xF);
                         }
@@ -4480,11 +4472,11 @@ fn cbInstructions() {
                         0xE8...0xEF => {//SET 5
                             testSetBit!(0, 0x20);
                         }
-                        
+
                         0xF0...0xF7 => {//SET 6
                             testSetBit!(0, 0x40);
                         }
-                        
+
                         0xF8...0xFF => {//SET 7
                             testSetBit!(0, 0x80);
                         }
@@ -4497,7 +4489,7 @@ fn cbInstructions() {
             }
         }
 
-        
+
     }
 
 }

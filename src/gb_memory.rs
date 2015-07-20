@@ -3,6 +3,7 @@ use std::io;
 use std::io::Read;
 
 use gb_util::*;
+use gb_lcd::*;
 
 extern crate sdl2;
 
@@ -13,19 +14,8 @@ pub struct MemoryMapState {
     pub zeroPageRAM: [u8;0x7F],
     pub romData: Vec<u8>,
     pub inBios: bool,
-    
-    //lcd fields
-    pub palette: [Color;4], //color palette
-    pub videoRAM: [u8;0x2000],
-    pub lcdMode: LCDMode, 
-    pub lcdModeClock: u32,
-    pub lcdSCX: u8, //scroll x
-    pub lcdSCY: u8, //scroll y
-    pub currScanLine: u8,
-    pub backgroundTileMap: u8, //which background tile map to use (0 or 1)
-    pub backgroundTileSet: u8, //which background tile set to use (0 or 1)
-    pub isBackgroundEnabled: bool,
-    pub isLCDEnabled: bool
+
+    pub lcd: LCDState,
 
 }
 
@@ -37,40 +27,13 @@ impl MemoryMapState {
             zeroPageRAM: [0;0x7F],
             romData: vec![],
             inBios: true,
-            
-            lcdMode: LCDMode::ScanOAM,
-            lcdModeClock: 0,
-            lcdSCX: 0, //scroll x
-            lcdSCY: 0, //scroll y
-            currScanLine: 0,
-            videoRAM: [0;0x2000],
-            backgroundTileMap: 0, //which tile map to use (0 or 1)
-            backgroundTileSet: 0, //which tile set to use (0 or 1)
-            isBackgroundEnabled: false,
-            palette: [WHITE, WHITE, WHITE, WHITE], //color pallet
-            isLCDEnabled: false
+
+            lcd: LCDState::new(),
         }
     }
 
 
 }
-
-#[derive(PartialEq, Copy, Clone)]
-pub enum LCDMode {
-    HBlank = 0,
-    VBlank = 1, 
-    ScanOAM = 2,
-    ScanVRAM = 3
-}
-
-pub type Color = sdl2::pixels::Color;
-pub const WHITE: Color = sdl2::pixels::Color::RGBA(255, 255, 255, 255);
-pub const LIGHT_GRAY: Color = sdl2::pixels::Color::RGBA(170,170,170,255);
-pub const DARK_GRAY: Color = sdl2::pixels::Color::RGBA(85,85,85,255);
-pub const BLACK: Color = sdl2::pixels::Color::RGBA(0,0,0,255);
-
-pub type LCDScreen = [[Color;160];144]; 
-pub const BLANK_SCREEN: LCDScreen = [[WHITE;160];144];
 
 static BIOS: [u8; 0x100] = [
     0x31, 0xFE, 0xFF, 0xAF, 0x21, 0xFF, 0x9F, 0x32, 0xCB, 0x7C, 0x20, 0xFB, 0x21, 0x26, 0xFF, 0x0E,
@@ -93,8 +56,9 @@ static BIOS: [u8; 0x100] = [
 
 
 pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
-    use self::LCDMode::*;
+    use gb_lcd::LCDMode::*;
 
+    let lcd = &memory.lcd;
 
     let i = addr as usize;
     match addr {
@@ -104,8 +68,8 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0x4000...0x7FFF => memory.romData[i], //TODO: Implement bank swapping
         0x8000...0x9FFF => {
             //vram can only be properly accessed when not being drawn from
-            if memory.lcdMode != ScanVRAM {
-                memory.videoRAM[i - 0x8000]
+            if lcd.mode != ScanVRAM {
+                lcd.videoRAM[i - 0x8000]
             }
             else {
                 0xFF
@@ -117,34 +81,34 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
             let mut control = 0u8;
 
             //Bit 7 - LCD Enabled
-            control = if memory.isLCDEnabled { control | 0x80} else {control};
+            control = if lcd.isEnabled { control | 0x80} else {control};
             //TODO: Tile stuff goes here
 
             //Bit 4 - Background Tile Set Select
-            control |= memory.backgroundTileSet << 4;
+            control |= lcd.backgroundTileSet << 4;
             //Bit 3 - Background Tile Data Select
-            control |= memory.backgroundTileMap << 3;
+            control |= lcd.backgroundTileMap << 3;
 
             //Bit 0 - Background enabled
-            control |= if memory.isBackgroundEnabled {1} else {0};
+            control |= if lcd.isBackgroundEnabled {1} else {0};
 
 
             control
         },
         0xFF41 => { //LCD Status
             let mut status = 0;
-            status |= memory.lcdMode as u8; //put in lcd mode
+            status |= lcd.mode as u8; //put in lcd mode
 
             status
         },
-        0xFF42 => memory.lcdSCY,
-        0xFF43 => memory.lcdSCX,
-        0xFF44 => memory.currScanLine,
+        0xFF42 => lcd.scy,
+        0xFF43 => lcd.scx,
+        0xFF44 => lcd.currScanLine,
         0xFF47 => {
             let mut colorReg = 0;
             
-            for i in 0..memory.palette.len() {
-                let color = match memory.palette[i] {
+            for i in 0..lcd.palette.len() {
+                let color = match lcd.palette[i] {
                     WHITE => 0,
                     LIGHT_GRAY => 1,
                     DARK_GRAY => 2,
@@ -165,36 +129,38 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
 
 
 pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
-    use self::LCDMode::*;
+    use gb_lcd::LCDMode::*;
+
+    let lcd = &mut memory.lcd;
 
     let i = addr as usize;
     match addr {
         //vram can only be properly accessed when not being drawn from
-        0x8000...0x9FFF if memory.lcdMode != ScanVRAM => memory.videoRAM[i - 0x8000] = byte,
+        0x8000...0x9FFF if lcd.mode != ScanVRAM => lcd.videoRAM[i - 0x8000] = byte,
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
         0xFF40 => { //LCD Control
 
             //Bit 7 - LCD Enabled
-            memory.isLCDEnabled = if (byte & 0x80) != 0 {true} else {false};
+            lcd.isEnabled = if (byte & 0x80) != 0 {true} else {false};
             
             //Bit 4 - Background Tile Set Select
-            memory.backgroundTileSet = (byte >> 4) & 1;
+            lcd.backgroundTileSet = (byte >> 4) & 1;
             //Bit 3 - Background Tile Map Select
-            memory.backgroundTileMap = (byte >> 3) & 1;
+            lcd.backgroundTileMap = (byte >> 3) & 1;
 
             //Bit 0 - Background enabled
-            memory.isBackgroundEnabled = (byte & 1) != 0;
+            lcd.isBackgroundEnabled = (byte & 1) != 0;
 
         },
-        0xFF42 => memory.lcdSCY = byte,
-        0xFF43 => memory.lcdSCX = byte,
-        0xFF44 => memory.currScanLine = 0, //resets the current line if written to
+        0xFF42 => lcd.scy = byte,
+        0xFF43 => lcd.scx = byte,
+        0xFF44 => lcd.currScanLine = 0, //resets the current line if written to
         0xFF47 => {
-            for i in 0..memory.palette.len() {
+            for i in 0..lcd.palette.len() {
                 let colorNum = (byte >> 2 * i) & 3; 
 
-                memory.palette[i] = match colorNum {
+                lcd.palette[i] = match colorNum {
                     0 => WHITE,
                     1 => LIGHT_GRAY,
                     2 => DARK_GRAY,

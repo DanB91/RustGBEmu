@@ -51,6 +51,16 @@ pub enum Flag {
     Carry = 0x10
 }
 
+pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
+    let instructionToExecute = readByteFromMemory(mem, cpu.PC);
+
+    let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
+    cpu.PC = newPC;
+    cpu.instructionCycles = cyclesTaken;
+    cpu.totalCycles.wrapping_add(cyclesTaken);
+
+}
+
 
 pub fn setFlag(flag: Flag, F: &mut u8) {
     *F |= flag as u8;
