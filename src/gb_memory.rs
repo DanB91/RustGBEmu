@@ -4,9 +4,7 @@ use std::io::Read;
 
 use gb_util::*;
 use gb_lcd::*;
-
-extern crate sdl2;
-
+use gb_joypad::*;
 
 //NOTE(DanB):anything accessed by MMU goes in here including LCD related function
 pub struct MemoryMapState {
@@ -16,6 +14,7 @@ pub struct MemoryMapState {
     pub inBios: bool,
 
     pub lcd: LCDState,
+    pub joypad: JoypadState
 
 }
 
@@ -29,6 +28,7 @@ impl MemoryMapState {
             inBios: true,
 
             lcd: LCDState::new(),
+            joypad: JoypadState::new()
         }
     }
 
@@ -59,6 +59,7 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
     use gb_lcd::LCDMode::*;
 
     let lcd = &memory.lcd;
+    let joypad = &memory.joypad;
 
     let i = addr as usize;
     match addr {
@@ -66,6 +67,7 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0...0xFF if !memory.inBios => memory.romData[i], 
         0x100...0x3FFF => memory.romData[i],
         0x4000...0x7FFF => memory.romData[i], //TODO: Implement bank swapping
+       
         0x8000...0x9FFF => {
             //vram can only be properly accessed when not being drawn from
             if lcd.mode != ScanVRAM {
@@ -75,8 +77,10 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
                 0xFF
             }
         }
+
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000],
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000], //echo of internal RAM 
+        
         0xFF40 => { //LCD Control
             let mut control = 0u8;
 
@@ -95,12 +99,43 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
 
             control
         },
+
+        0xFF00 => { //Joypad register
+            let mut joypReg = 0u8;
+
+            //TODO put breakpoint here
+            match joypad.selectedButtonGroup {
+                ButtonGroup::DPad => {
+                    joypReg = 0x20;
+
+                    joypReg |= (joypad.down as u8) << 3;
+                    joypReg |= (joypad.up as u8) << 2;
+                    joypReg |= (joypad.left as u8) << 1;
+                    joypReg |= joypad.right as u8;
+                }
+
+                ButtonGroup::FaceButtons => {
+                    joypReg = 0x10;
+
+                    joypReg |= (joypad.start as u8) << 3;
+                    joypReg |= (joypad.select as u8) << 2;
+                    joypReg |= (joypad.b as u8) << 1;
+                    joypReg |= joypad.a as u8;
+                }
+
+                ButtonGroup::Nothing => {}
+            }
+
+            joypReg
+        },
+
         0xFF41 => { //LCD Status
             let mut status = 0;
             status |= lcd.mode as u8; //put in lcd mode
 
             status
         },
+
         0xFF42 => lcd.scy,
         0xFF43 => lcd.scx,
         0xFF44 => lcd.currScanLine,
@@ -132,6 +167,7 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
     use gb_lcd::LCDMode::*;
 
     let lcd = &mut memory.lcd;
+    let joypad = &mut memory.joypad;
 
     let i = addr as usize;
     match addr {
@@ -139,6 +175,15 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
         0x8000...0x9FFF if lcd.mode != ScanVRAM => lcd.videoRAM[i - 0x8000] = byte,
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
+        0xFF00 => {//Joypad Register
+            match byte & 0x30 { //only look at bits 4 and 5
+                0x20 => joypad.selectedButtonGroup = ButtonGroup::DPad,
+                0x10 => joypad.selectedButtonGroup = ButtonGroup::FaceButtons,
+                0 => joypad.selectedButtonGroup = ButtonGroup::Nothing,
+                _ => panic!("This really would be an error in the compiler if we hit here")
+            }
+
+        }
         0xFF40 => { //LCD Control
 
             //Bit 7 - LCD Enabled

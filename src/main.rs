@@ -24,6 +24,7 @@ use errno::*;
 use gbEmu::gb_memory::*;
 use gbEmu::gb_cpu::*;
 use gbEmu::gb_lcd::*;
+use gbEmu::gb_joypad::*;
 use gbEmu::gb_util::*;
 
 //use sdl2::render::Renderer;
@@ -45,18 +46,9 @@ const SECONDS_PER_FRAME: f32 = 1f32/60f32;
 const CYCLES_PER_SLEEP: u32 = 60000;
 
 
-
-//Used to tell whether a Game Boy button is up or down 
-#[derive(PartialEq, Copy, Clone)]
-enum ButtonState {
-    Up, //Key is unpressed
-    Down //Key is currently held down
-}
-
-
 struct GameBoyState {
     pub cpu: CPUState,
-    pub mem: MemoryMapState,
+    pub mem: MemoryMapState
 }
 
 impl GameBoyState {
@@ -224,11 +216,39 @@ fn main() {
         //get the start time to calculate time
         let start = get_performance_counter();
 
+        //TODO: Refactor event handling
         //SDL Events
         for event in sdlContext.event_pump().poll_iter() {
 
             match event {
                 Event::Quit{..} => prg.isRunning = false,
+
+            
+                Event::KeyUp{keycode: keyOpt, ..} => {
+                    match keyOpt {
+
+                        Some(key) => {
+
+                            match key {
+                                Keycode::Up => gb.mem.joypad.up = ButtonState::Up,
+                                Keycode::Down => gb.mem.joypad.down = ButtonState::Up,
+                                Keycode::Left => gb.mem.joypad.left = ButtonState::Up,
+                                Keycode::Right => gb.mem.joypad.right = ButtonState::Up,
+                                
+                                Keycode::X => gb.mem.joypad.a = ButtonState::Up,
+                                Keycode::Z => gb.mem.joypad.b = ButtonState::Up,
+                                Keycode::Return => gb.mem.joypad.start = ButtonState::Up,
+                                Keycode::RShift => gb.mem.joypad.select = ButtonState::Up,
+                                _ => {}
+                            }
+                        }
+
+                        None => {}
+
+                    }
+                }
+
+
                 Event::KeyDown{keycode: keyOpt, repeat: isRepeat, ..} => {
                     match keyOpt {
                         Some(key) => {
@@ -237,13 +257,22 @@ fn main() {
                                     if !isRepeat {
                                         prg.shouldDisplayDebug = !prg.shouldDisplayDebug;
                                     }
-                                }
-                                
+                                } 
                                 Keycode::P => {
                                     if !isRepeat {
                                         prg.isPaused = !prg.isPaused;
                                     }
                                 }
+
+                                Keycode::Up => gb.mem.joypad.up = ButtonState::Down,
+                                Keycode::Down => gb.mem.joypad.down = ButtonState::Down,
+                                Keycode::Left => gb.mem.joypad.left = ButtonState::Down,
+                                Keycode::Right => gb.mem.joypad.right = ButtonState::Down,
+
+                                Keycode::X => gb.mem.joypad.a = ButtonState::Down,
+                                Keycode::Z => gb.mem.joypad.b = ButtonState::Down,
+                                Keycode::Return => gb.mem.joypad.start = ButtonState::Down,
+                                Keycode::RShift => gb.mem.joypad.select = ButtonState::Down,
                                 _ => {}
                             }
                         }
