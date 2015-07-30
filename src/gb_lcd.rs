@@ -1,10 +1,15 @@
 extern crate sdl2;
+
 use std::mem::swap; 
 
 //Holds the state of the  screen and controller
 pub struct LCDState {
+    //rename to backgroundPalette
     pub palette: [Color;4], //color palette
+    pub spritePalette0: [Color;4], 
+    pub spritePalette1: [Color;4],
     pub videoRAM: [u8;0x2000],
+    pub oam: [u8;0xA0], //sprite memory
     pub mode: LCDMode, 
     pub modeClock: u32,
     pub scx: u8, //scroll x
@@ -24,9 +29,10 @@ pub enum LCDMode {
     HBlank = 0,
     VBlank = 1, 
     ScanOAM = 2,
-    ScanVRAM = 3
+    ScanVRAMAndOAM = 3
 }
 
+//TODO: Rename to PaletteColor
 pub type Color = sdl2::pixels::Color;
 pub const WHITE: Color = sdl2::pixels::Color::RGBA(255, 255, 255, 255);
 pub const LIGHT_GRAY: Color = sdl2::pixels::Color::RGBA(170,170,170,255);
@@ -35,6 +41,14 @@ pub const BLACK: Color = sdl2::pixels::Color::RGBA(0,0,0,255);
 
 pub type LCDScreen = [[Color;160];144]; 
 pub const BLANK_SCREEN: LCDScreen = [[WHITE;160];144];
+
+
+const PIXELS_PER_TILE_ROW: usize = 8;
+const PIXELS_PER_TILE_COLUMN: usize = 8;
+const BYTES_PER_TILE_ROW: usize = 2;
+const BYTES_PER_TILE: usize = 16;
+const TILES_PER_MAP_ROW: usize = 32;
+const TILES_PER_MAP_COLUMN: usize = 32;
 
 impl LCDState {
 
@@ -47,10 +61,13 @@ impl LCDState {
             scy: 0, //scroll y
             currScanLine: 0,
             videoRAM: [0;0x2000],
+            oam: [0;0xA0],
             backgroundTileMap: 0, //which tile map to use (0 or 1)
             backgroundTileSet: 0, //which tile set to use (0 or 1)
             isBackgroundEnabled: false,
             palette: [WHITE, WHITE, WHITE, WHITE], //color pallet
+            spritePalette0: [WHITE, WHITE, WHITE, WHITE], 
+            spritePalette1: [WHITE, WHITE, WHITE, WHITE], 
             isEnabled: false,
 
             screen: BLANK_SCREEN,
@@ -60,6 +77,191 @@ impl LCDState {
 
 
 }
+
+struct Sprite {
+    y: u8,
+    x: u8,
+    tileReference: u8,
+
+    isBelowBackground: bool,
+    isYFlipped: bool,
+    isXFlipped: bool,
+    selectedSpritePalette: SpritePalette,
+    
+    oamIndex: usize //the index in LCDState.oam that the sprite is stored in.
+        //used for priority sorting
+}
+
+enum SpritePalette {
+    Palette0 = 0,
+    Palette1 = 1
+}
+
+impl Sprite {
+    fn new(y: u8, x: u8, tileReference: u8, flags: u8, oamIndex: usize) -> Sprite {
+        let isBelowBackground = testBit!(flags, 7);  
+        let isYFlipped = testBit!(flags, 6);
+        let isXFlipped = testBit!(flags, 5);
+        let selectedSpritePalette =
+            if testBit!(flags, 4) {
+                Palette1
+            }
+            else {
+                Palette0
+            };
+
+        Sprite {
+            y: y,
+            x: x,
+            tileReference: tileReference,
+
+            isBelowBackground: isBelowBackground,
+            isYFlipped: isYFlipped,
+            isXFlipped: isXFlipped,
+            selectedSpritePalette: selectedSpritePalette,
+
+            oamIndex: oamIndex
+        }
+    }
+}
+
+#[derive(PartialEq, Copy, Clone)]
+enum ColorNumber {
+    Color0 = 0,
+    Color1 = 1,
+    Color2 = 2,
+    Color3 = 3
+}
+
+impl ColorNumber {
+    fn fromU8(num: u8) -> ColorNumber {
+        match num {
+            0 => Color0,
+            1 => Color1,
+            2 => Color2,
+            3 => Color3,
+            _ => panic!("Color number should be between 0 and 3")
+        }
+
+    }
+}
+
+use self::ColorNumber::*;
+use self::SpritePalette::*;
+
+fn spritePaletteColorForColorNumber(colorNum: ColorNumber, sprite: &Sprite, lcd: &mut LCDState) -> Color {
+    debug_assert!(colorNum != Color0, "Color0 is not a valid palette color for sprites"); //Color0 is not a valid palette color for sprites
+
+    match sprite.selectedSpritePalette {
+        Palette0 => lcd.spritePalette0[colorNum as usize],
+        Palette1 => lcd.spritePalette1[colorNum as usize]
+    }
+}
+
+fn backgroundPaletteColorForColorNumber(colorNum: ColorNumber, lcd: &mut LCDState) -> Color {
+    lcd.palette[colorNum as usize]
+}
+
+fn getBackgroundTileReferenceStartAddress(lcd: &mut LCDState) -> usize {
+    let yInPixels = lcd.scy.wrapping_add(lcd.currScanLine);
+
+    let mut tileRefAddr = match lcd.backgroundTileMap {
+        0 => 0x1800usize,  //it is 0x1800 instead of 0x9800 because this is relative to start of vram
+        1 => 0x1C00usize,
+        _ => panic!("Uh oh, the tile map should only be 0 or 1")
+    };
+
+    /* Tile Map:
+     *
+     * Each "row" is 32 bytes long where each byte is a tile reference
+     * Each byte represents a 8x8 pixel tils, so each row and column are 256 pixels long
+     * Each byte represents a 16 byte tile where every 2 bytes represents an 8 pixel row
+     *
+     *------------------------------------------------------
+     *|tile ref | tile ref | ...............................
+     *|-----------------------------------------------------
+     *|tile ref | tile ref | ...............................
+     *|.
+     *|.
+     *|.
+     */
+    tileRefAddr += (yInPixels as usize / PIXELS_PER_TILE_COLUMN) * TILES_PER_MAP_COLUMN; //which tile in the y dimension?
+
+    tileRefAddr += lcd.scx as usize / PIXELS_PER_TILE_ROW; //which tile in x dimension?
+
+    tileRefAddr
+
+}
+
+fn getBackgroundTileAddressFromReferenceAddress(backgroundTileReferenceAddress: usize, lcd: &mut LCDState) -> usize {
+    let yInPixels = lcd.scy.wrapping_add(lcd.currScanLine);
+    let tileRef = lcd.videoRAM[backgroundTileReferenceAddress];
+
+    //find the tile based on the tile reference
+    let mut tileAddr = match lcd.backgroundTileSet {
+        0 => (0x1000i16 + ((tileRef as i8 as i16) * BYTES_PER_TILE as i16)) as usize, //signed addition
+        1 => (tileRef as usize) * BYTES_PER_TILE, 
+        _ => panic!("Uh oh, the tile set should only be 0 or 1")
+    };
+
+
+    //since we already found the correct tile, we only need the last 3 bits of the 
+    //y-scroll register to determine where in the tile we start
+    tileAddr += ((yInPixels & 7) as usize) * BYTES_PER_TILE_ROW;
+
+    tileAddr
+
+}
+
+fn colorNumberForBackgroundTileReferenceAddress(backgroundTileRefAddr: usize, scanLinePos: usize, lcd: &mut LCDState) -> ColorNumber {
+
+    let xMask = 0x80u8 >> ((scanLinePos + lcd.scx as usize) & 7);
+    let backgroundTileAddr = getBackgroundTileAddressFromReferenceAddress(backgroundTileRefAddr, lcd);
+
+    let highBit = if (lcd.videoRAM[backgroundTileAddr + 1] & xMask) != 0 {1u8} else {0};
+    let lowBit = if (lcd.videoRAM[backgroundTileAddr] & xMask) != 0 {1u8} else {0};
+
+    ColorNumber::fromU8((highBit * 2) + lowBit)
+
+}
+
+//TODO: refactor
+fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDState) -> ColorNumber {
+
+    let currPixelYPostion = lcd.scy.wrapping_add(lcd.currScanLine) as usize;
+    let spriteYStart = sprite.y.wrapping_sub(16) as usize;
+
+
+    let spriteXStart = sprite.x.wrapping_sub(8) as usize;
+    let currPixelXPostion = posInScanLine.wrapping_add(lcd.scx as usize);
+
+    debug_assert!(currPixelXPostion >= spriteXStart);
+    debug_assert!(currPixelYPostion >= spriteYStart);
+
+    let currPixelYPostionInTile = currPixelYPostion - spriteYStart; 
+
+    //TODO: Place check for sprite height here
+    if currPixelYPostionInTile >= 8 {
+        return Color0;
+    }
+
+    let xMask = 0x80u8 >> (currPixelXPostion - spriteXStart & 7);
+
+    //sprites start at start of vram
+    let mut tileAddr = sprite.tileReference as usize * BYTES_PER_TILE; 
+    
+    //since we already found the correct tile, we only need the last 3 bits of the 
+    //y-scroll register to determine where in the tile we start
+    tileAddr += (((currPixelYPostion - spriteYStart) & 7) as usize) * BYTES_PER_TILE_ROW;
+
+    let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
+    let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
+
+    ColorNumber::fromU8((highBit * 2) + lowBit)
+    
+}
+
+
 
 pub fn stepLCD(lcd: &mut LCDState, cyclesTakenOfLastInstruction: u32) {
     use self::LCDMode::*;
@@ -101,89 +303,129 @@ pub fn stepLCD(lcd: &mut LCDState, cyclesTakenOfLastInstruction: u32) {
                 //TODO: Draw OAM to internal screen buffer
 
 
-                lcd.mode = ScanVRAM;
+                lcd.mode = ScanVRAMAndOAM;
                 lcd.modeClock = 0;
             },
 
-            ScanVRAM if lcd.modeClock >= 172 => {
+            ScanVRAMAndOAM if lcd.modeClock >= 172 => {
                 //TODO: Draw VRAM to internal screen buffer
 
-                let y = lcd.scy.wrapping_add(lcd.currScanLine);
+                let yInPixels = lcd.scy.wrapping_add(lcd.currScanLine);
 
-                //draw background
-                if lcd.isBackgroundEnabled {
-                    let mut tileRefAddr = match lcd.backgroundTileMap {
-                        0 => 0x1800usize,  //it is 0x1800 instead of 0x9800 because this is relative to start of vram
-                        1 => 0x1C00usize,
-                        _ => panic!("Uh oh, the tile map should only be 0 or 1")
+                let mut backgroundTileRefAddr = getBackgroundTileReferenceStartAddress(lcd);
+                let backgroundTileRefRowStart = backgroundTileRefAddr - (lcd.scx as usize / PIXELS_PER_TILE_ROW); 
+
+
+                let mut spritesSortedByPriority: Vec<Sprite> = vec![];
+
+                //get sprites to draw for this scan line 
+                let mut i = 0;
+                while i < lcd.oam.len() {
+                    //sprite location is lower right hand corner
+                    //so x and y coords are offset by 8 and 16 respectively
+                    
+                    let spriteY = lcd.oam[i];
+                    let spriteX = lcd.oam[i+1];
+
+                    //x coordinates explicitly ignored since even though sprites outside of the
+                    //screen are not drawn, they do affect priority
+                    if yInPixels < spriteY &&
+                        yInPixels >= spriteY.wrapping_sub(16) {
+
+                        spritesSortedByPriority.push(
+                            Sprite::new(spriteY, spriteX, lcd.oam[i+2], lcd.oam[i+3], i)
+                            );
+                    }
+
+                    i += 4;
+
+                }
+
+                //sort sprites by priority (last element is lowest priority)
+                spritesSortedByPriority.sort_by(|left, right| {
+                    if left.x != right.x {
+                        left.x.cmp(&right.x)
+                    }
+                    else {
+                        left.oamIndex.cmp(&right.oamIndex)
+                    }
+                });
+
+                let numSpritesToDraw = if spritesSortedByPriority.len() < 10 {
+                    spritesSortedByPriority.len()
+                }
+                else {
+                    10
+                };
+
+                //can only draw at most 10 sprites per scanline
+                let spritesToDraw = &spritesSortedByPriority[0..numSpritesToDraw];
+
+
+                for posInScanLine in 0..160usize {
+
+                    let mut spriteColorNum = Color0;
+                    let mut spriteToDraw = None;
+
+                    for sprite in spritesToDraw {
+
+                        if (posInScanLine as u8) < sprite.x && 
+                            (posInScanLine as u8) >= sprite.x.wrapping_sub(8) {
+                                //TODO: look at oam memory
+                                spriteColorNum = colorNumberForSprite(&sprite, posInScanLine, lcd);
+
+                                //NOTE: WHITE indicates transparent in this case.  If the sprite pixel is
+                                //not transparent, then we found the sprite to draw since we
+                                //already sorted by priority
+                                if spriteColorNum != Color0 {
+                                    spriteToDraw = Some(sprite);
+                                    break;
+                                }
+                            }
+                    }
+
+
+                    let backgroundColorNum = if lcd.isBackgroundEnabled {
+                        colorNumberForBackgroundTileReferenceAddress(backgroundTileRefAddr, posInScanLine, lcd) 
+                    }
+                    else {
+                        Color0
                     };
 
-                    /* Tile Map:
-                     *
-                     * Each "row" is 32 bytes long where each byte is a tile reference
-                     * Each byte represents a 8x8 pixel tils, so each row and column are 256 pixels long
-                     * Each byte represents a 16 byte tile where every 2 bytes represents an 8 pixel row
-                     *
-                     *------------------------------------------------------
-                     *|tile ref | tile ref | ...............................
-                     *|-----------------------------------------------------
-                     *|tile ref | tile ref | ...............................
-                     *|.
-                     *|.
-                     *|.
-                     */
-                    tileRefAddr += (y as usize / 8) * 32; //which tile in the y dimension?
+                    let colorToDraw = 
+                        match spriteToDraw  {
+                            Some(sprite) => {
+                                if sprite.isBelowBackground {
+                                    if backgroundColorNum != Color0 {
+                                        backgroundPaletteColorForColorNumber(backgroundColorNum, lcd)
+                                    }
+                                    else if spriteColorNum != Color0 {
+                                        spritePaletteColorForColorNumber(spriteColorNum, &sprite, lcd)
+                                    }
+                                    else {
+                                        WHITE
+                                    }
+                                }
+                                else {
+                                    if spriteColorNum != Color0 {
+                                        spritePaletteColorForColorNumber(spriteColorNum, &sprite, lcd)
+                                    }
+                                    else {
+                                        backgroundPaletteColorForColorNumber(backgroundColorNum, lcd)
+                                    }
 
-                    let tileRefRowStart = tileRefAddr; // start of the row in the 32x32 tile map
+                                }
+                            }
+                            None => backgroundPaletteColorForColorNumber(backgroundColorNum, lcd)
+                        }; 
 
-                    tileRefAddr += lcd.scx as usize / 8; //which tile in x dimension?
+                    //after all this shit, finally draw the pixel
+                    lcd.screenBackBuffer[lcd.currScanLine as usize][posInScanLine as usize] = colorToDraw;
 
-                    //the x pixel is gotten by shifting a mask of the form 100000
-                    let mut xMask = 0x80u8 >> (lcd.scx & 7);
-
-                    for x in 0..160 {
-
-                        let tileRef = lcd.videoRAM[tileRefAddr];
-
-                        //find the tile based on the tile reference
-                        let mut tileAddr = match lcd.backgroundTileSet {
-                            0 => (0x1000i16 + ((tileRef as i8 as i16) * 16)) as usize, //signed addition
-                            1 => (tileRef as usize) * 16usize, 
-                            _ => panic!("Uh oh, the tile set should only be 0 or 1")
-                        };
-
-
-                        //since we already found the correct tile, we only need the last 3 bits of the 
-                        //y-scroll register to determine where in the tile we start
-                        tileAddr += ((y & 7) as usize) * 2;
-
-                        let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
-                        let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
-
-                        let color = lcd.palette[((highBit * 2) + lowBit) as usize];
-
-                        //after all this shit, finally draw the pixel
-                        lcd.screenBackBuffer[lcd.currScanLine as usize][x as usize] = color; 
-
-                        //update xMask and tile reference appropriately if we are at the end of a tile
-                        match xMask {
-                            1 => {
-                                xMask = 0x80;
-                                //the mod 32 makes sure we wrap around to the beginning of the tile map row,
-                                //if need be
-                                tileRefAddr = tileRefRowStart + ((tileRefAddr + 1) % 32);
-                            },
-                            _ => xMask >>= 1
-                        };
-
+                    if posInScanLine % PIXELS_PER_TILE_ROW == 7 {
+                        backgroundTileRefAddr = backgroundTileRefRowStart + ((backgroundTileRefAddr + 1) % TILES_PER_MAP_COLUMN);
                     }
-                }
-                //background not enabled
-                else {
-                    for x in 0..160 {
-                        //just draw white
-                        lcd.screenBackBuffer[lcd.currScanLine as usize][x as usize] = WHITE; 
-                    }
+
                 }
 
 

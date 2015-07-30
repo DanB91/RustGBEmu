@@ -9,6 +9,7 @@ extern crate sdl2_sys;
 
 extern crate errno;
 
+#[macro_use]
 extern crate gbEmu;
 
 mod sdl2_ttf;

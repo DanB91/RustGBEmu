@@ -18,3 +18,8 @@ pub fn lb(word: u16) -> u8 {
     word as u8
 }
 
+macro_rules! testBit {
+    ($num: expr, $bit: expr) => ({
+        ($num & (1 << $bit)) != 0
+    })
+}

@@ -73,3 +73,15 @@ fn testLCDControlRegister() {
 
     assert_eq!(readByteFromMemory(&mem,0xFF40), 0x19); 
 }
+
+#[test]
+fn testOAM() {
+    let mut mem = MemoryMapState::new();
+    mem.lcd.mode = LCDMode::VBlank;
+
+    writeByteToMemory(&mut mem, 0x19, 0xFE9F);
+
+    assert_eq!(mem.lcd.oam[0x9F], 0x19);
+
+    assert_eq!(readByteFromMemory(&mem,0xFE9F), 0x19); 
+}

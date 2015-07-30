@@ -54,6 +54,39 @@ static BIOS: [u8; 0x100] = [
     0xF5, 0x06, 0x19, 0x78, 0x86, 0x23, 0x05, 0x20, 0xFB, 0x86, 0x20, 0xFE, 0x3E, 0x01, 0xE0, 0x50
 ];
 
+fn u8ForColorPalette(colorPalette: &[Color]) -> u8 {
+    let mut colorReg = 0;
+
+    for i in 0..colorPalette.len() {
+        let color = match colorPalette[i] {
+            WHITE => 0,
+            LIGHT_GRAY => 1,
+            DARK_GRAY => 2,
+            BLACK => 3,
+            _ => panic!("Only 4 colors implmented so far...")
+        };
+        colorReg |= color << (i * 2);
+
+    }
+
+    colorReg
+    
+}
+
+fn updateColorPaletteFromU8(colorPalette: &mut [Color], val: u8) {
+    for i in 0..colorPalette.len() {
+        let colorNum = (val >> 2 * i) & 3; 
+
+        colorPalette[i] = match colorNum {
+            0 => WHITE,
+            1 => LIGHT_GRAY,
+            2 => DARK_GRAY,
+            3 => BLACK,
+            _ => panic!("Only 4 colors available.  Bad color: {}", colorNum)
+        };
+    }
+
+}
 
 pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
     use gb_lcd::LCDMode::*;
@@ -70,7 +103,7 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
        
         0x8000...0x9FFF => {
             //vram can only be properly accessed when not being drawn from
-            if lcd.mode != ScanVRAM {
+            if lcd.mode != ScanVRAMAndOAM {
                 lcd.videoRAM[i - 0x8000]
             }
             else {
@@ -80,7 +113,16 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
 
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000],
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000], //echo of internal RAM 
-        
+        0xFE00...0xFE9F => {
+            lcd.oam[i - 0xFE00]
+        //TODO: Enable commented out code
+         /*   if lcd.mode != ScanVRAMAndOAM && lcd.mode != ScanOAM {
+                lcd.oam[i - 0xFE00]
+            }
+            else {
+                0xFF
+            }*/
+        }
         0xFF40 => { //LCD Control
             let mut control = 0u8;
 
@@ -139,23 +181,9 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0xFF42 => lcd.scy,
         0xFF43 => lcd.scx,
         0xFF44 => lcd.currScanLine,
-        0xFF47 => {
-            let mut colorReg = 0;
-            
-            for i in 0..lcd.palette.len() {
-                let color = match lcd.palette[i] {
-                    WHITE => 0,
-                    LIGHT_GRAY => 1,
-                    DARK_GRAY => 2,
-                    BLACK => 3,
-                    _ => panic!("Only 4 colors implmented so far...")
-                };
-                colorReg |= color << (i * 2);
-
-            }
-
-            colorReg
-        }
+        0xFF47 => u8ForColorPalette(&lcd.palette),
+        0xFF48 => u8ForColorPalette(&lcd.spritePalette0),
+        0xFF49 => u8ForColorPalette(&lcd.spritePalette1),
         0xFF50 => if memory.inBios {0} else {1},
         0xFF80...0xFFFE => memory.zeroPageRAM[i - 0xFF80],
         _ => 0
@@ -172,9 +200,12 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
     let i = addr as usize;
     match addr {
         //vram can only be properly accessed when not being drawn from
-        0x8000...0x9FFF if lcd.mode != ScanVRAM => lcd.videoRAM[i - 0x8000] = byte,
+        0x8000...0x9FFF if lcd.mode != ScanVRAMAndOAM => lcd.videoRAM[i - 0x8000] = byte,
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
+        //TODO: Enable commented out code
+        0xFE00...0xFE9F /*if lcd.mode != ScanVRAMAndOAM && lcd.mode != ScanOAM*/ => 
+            lcd.oam[i - 0xFE00] = byte,
         0xFF00 => {//Joypad Register
             match byte & 0x30 { //only look at bits 4 and 5
                 0x20 => joypad.selectedButtonGroup = ButtonGroup::DPad,
@@ -201,20 +232,9 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
         0xFF42 => lcd.scy = byte,
         0xFF43 => lcd.scx = byte,
         0xFF44 => lcd.currScanLine = 0, //resets the current line if written to
-        0xFF47 => {
-            for i in 0..lcd.palette.len() {
-                let colorNum = (byte >> 2 * i) & 3; 
-
-                lcd.palette[i] = match colorNum {
-                    0 => WHITE,
-                    1 => LIGHT_GRAY,
-                    2 => DARK_GRAY,
-                    3 => BLACK,
-                    _ => panic!("Only 4 colors available.  Bad color: {}", colorNum)
-                };
-            }
-
-        }
+        0xFF47 => updateColorPaletteFromU8(&mut lcd.palette, byte),
+        0xFF48 => updateColorPaletteFromU8(&mut lcd.spritePalette0, byte),
+        0xFF49 => updateColorPaletteFromU8(&mut lcd.spritePalette1, byte),
         //TODO: Implement writing to LCD status
         0xFF50 => memory.inBios = if byte != 0 {false} else {true},
         0xFF80...0xFFFE => memory.zeroPageRAM[i - 0xFF80] = byte,     
