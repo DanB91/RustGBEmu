@@ -12,13 +12,15 @@ pub struct LCDState {
     pub oam: [u8;0xA0], //sprite memory
     pub mode: LCDMode, 
     pub modeClock: u32,
-    pub scx: u8, //scroll x
-    pub scy: u8, //scroll y
     pub currScanLine: u8,
     pub backgroundTileMap: u8, //which background tile map to use (0 or 1)
     pub backgroundTileSet: u8, //which background tile set to use (0 or 1)
     pub isBackgroundEnabled: bool,
     pub isEnabled: bool,
+
+    pub scx: u8, //scroll x
+    pub scy: u8, //scroll y
+    pub spriteHeight: SpriteHeight, //can be 8 or 16
     
     pub screen: LCDScreen,
     pub screenBackBuffer: LCDScreen,
@@ -32,6 +34,11 @@ pub enum LCDMode {
     ScanVRAMAndOAM = 3
 }
 
+pub enum SpriteHeight {
+    Short = 8,
+    Tall = 16
+}
+
 //TODO: Rename to PaletteColor
 pub type Color = sdl2::pixels::Color;
 pub const WHITE: Color = sdl2::pixels::Color::RGBA(255, 255, 255, 255);
@@ -42,13 +49,16 @@ pub const BLACK: Color = sdl2::pixels::Color::RGBA(0,0,0,255);
 pub type LCDScreen = [[Color;160];144]; 
 pub const BLANK_SCREEN: LCDScreen = [[WHITE;160];144];
 
-
-const PIXELS_PER_TILE_ROW: usize = 8;
-const PIXELS_PER_TILE_COLUMN: usize = 8;
+const TILE_WIDTH: usize = 8;
+const TILE_HEIGHT: usize = 8;
 const BYTES_PER_TILE_ROW: usize = 2;
 const BYTES_PER_TILE: usize = 16;
-const TILES_PER_MAP_ROW: usize = 32;
-const TILES_PER_MAP_COLUMN: usize = 32;
+const TILE_MAP_WIDTH: usize = 32;
+const TILE_MAP_HEIGHT: usize = 32;
+const MAX_SPRITES_PER_SCANLINE: usize = 10;
+
+const TALL_SPRITE_HEIGHT: usize = 16;
+const SHORT_SPRITE_HEIGHT: usize = 8;
 
 impl LCDState {
 
@@ -59,6 +69,7 @@ impl LCDState {
             modeClock: 0,
             scx: 0, //scroll x
             scy: 0, //scroll y
+            spriteHeight:  SpriteHeight::Short, 
             currScanLine: 0,
             videoRAM: [0;0x2000],
             oam: [0;0xA0],
@@ -92,6 +103,7 @@ struct Sprite {
         //used for priority sorting
 }
 
+#[derive(PartialEq, Copy, Clone)]
 enum SpritePalette {
     Palette0 = 0,
     Palette1 = 1
@@ -148,6 +160,7 @@ impl ColorNumber {
 
 use self::ColorNumber::*;
 use self::SpritePalette::*;
+use self::SpriteHeight::*;
 
 fn spritePaletteColorForColorNumber(colorNum: ColorNumber, sprite: &Sprite, lcd: &mut LCDState) -> Color {
     debug_assert!(colorNum != Color0, "Color0 is not a valid palette color for sprites"); //Color0 is not a valid palette color for sprites
@@ -185,9 +198,9 @@ fn getBackgroundTileReferenceStartAddress(lcd: &mut LCDState) -> usize {
      *|.
      *|.
      */
-    tileRefAddr += (yInPixels as usize / PIXELS_PER_TILE_COLUMN) * TILES_PER_MAP_COLUMN; //which tile in the y dimension?
+    tileRefAddr += (yInPixels as usize / TILE_HEIGHT) * TILE_MAP_HEIGHT; //which tile in the y dimension?
 
-    tileRefAddr += lcd.scx as usize / PIXELS_PER_TILE_ROW; //which tile in x dimension?
+    tileRefAddr += lcd.scx as usize / TILE_WIDTH; //which tile in x dimension?
 
     tileRefAddr
 
@@ -239,25 +252,46 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
     debug_assert!(currPixelYPostion >= spriteYStart);
 
     let currPixelYPostionInTile = currPixelYPostion - spriteYStart; 
-
-    //TODO: Place check for sprite height here
-    if currPixelYPostionInTile >= 8 {
-        return Color0;
-    }
-
+    
     let xMask = 0x80u8 >> (currPixelXPostion - spriteXStart & 7);
 
-    //sprites start at start of vram
-    let mut tileAddr = sprite.tileReference as usize * BYTES_PER_TILE; 
-    
-    //since we already found the correct tile, we only need the last 3 bits of the 
-    //y-scroll register to determine where in the tile we start
-    tileAddr += (((currPixelYPostion - spriteYStart) & 7) as usize) * BYTES_PER_TILE_ROW;
+    match lcd.spriteHeight {
+       Short => {
+            if currPixelYPostionInTile < Short as usize {
+                //sprites start at start of vram
+                let mut tileAddr = sprite.tileReference as usize * BYTES_PER_TILE; 
 
-    let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
-    let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
+                //since we already found the correct tile, we only need the last 3 bits of the 
+                //y-scroll register to determine where in the tile we start
+                tileAddr += (((currPixelYPostion - spriteYStart) & 7) as usize) * BYTES_PER_TILE_ROW;
 
-    ColorNumber::fromU8((highBit * 2) + lowBit)
+                let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
+                let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
+                
+                ColorNumber::fromU8((highBit * 2) + lowBit)
+            }
+            else {
+                Color0 //transparent
+            }
+        }
+
+       Tall => {
+           let tileRef = if currPixelYPostionInTile < 8 {sprite.tileReference & 0xFE} else {sprite.tileReference | 1};
+
+           //sprites start at start of vram
+           let mut tileAddr = tileRef as usize * BYTES_PER_TILE; 
+
+           tileAddr += (((currPixelYPostion - spriteYStart) & 7) as usize) * BYTES_PER_TILE_ROW;
+
+           let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
+           let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
+           
+           ColorNumber::fromU8((highBit * 2) + lowBit)
+
+       }
+    }
+
+
     
 }
 
@@ -313,7 +347,7 @@ pub fn stepLCD(lcd: &mut LCDState, cyclesTakenOfLastInstruction: u32) {
                 let yInPixels = lcd.scy.wrapping_add(lcd.currScanLine);
 
                 let mut backgroundTileRefAddr = getBackgroundTileReferenceStartAddress(lcd);
-                let backgroundTileRefRowStart = backgroundTileRefAddr - (lcd.scx as usize / PIXELS_PER_TILE_ROW); 
+                let backgroundTileRefRowStart = backgroundTileRefAddr - (lcd.scx as usize / TILE_WIDTH); 
 
 
                 let mut spritesSortedByPriority: Vec<Sprite> = vec![];
@@ -351,11 +385,11 @@ pub fn stepLCD(lcd: &mut LCDState, cyclesTakenOfLastInstruction: u32) {
                     }
                 });
 
-                let numSpritesToDraw = if spritesSortedByPriority.len() < 10 {
+                let numSpritesToDraw = if spritesSortedByPriority.len() < MAX_SPRITES_PER_SCANLINE {
                     spritesSortedByPriority.len()
                 }
                 else {
-                    10
+                    MAX_SPRITES_PER_SCANLINE
                 };
 
                 //can only draw at most 10 sprites per scanline
@@ -371,10 +405,10 @@ pub fn stepLCD(lcd: &mut LCDState, cyclesTakenOfLastInstruction: u32) {
 
                         if (posInScanLine as u8) < sprite.x && 
                             (posInScanLine as u8) >= sprite.x.wrapping_sub(8) {
-                                //TODO: look at oam memory
+
                                 spriteColorNum = colorNumberForSprite(&sprite, posInScanLine, lcd);
 
-                                //NOTE: WHITE indicates transparent in this case.  If the sprite pixel is
+                                //NOTE: Color0 indicates transparent in this case.  If the sprite pixel is
                                 //not transparent, then we found the sprite to draw since we
                                 //already sorted by priority
                                 if spriteColorNum != Color0 {
@@ -422,8 +456,8 @@ pub fn stepLCD(lcd: &mut LCDState, cyclesTakenOfLastInstruction: u32) {
                     //after all this shit, finally draw the pixel
                     lcd.screenBackBuffer[lcd.currScanLine as usize][posInScanLine as usize] = colorToDraw;
 
-                    if posInScanLine % PIXELS_PER_TILE_ROW == 7 {
-                        backgroundTileRefAddr = backgroundTileRefRowStart + ((backgroundTileRefAddr + 1) % TILES_PER_MAP_COLUMN);
+                    if posInScanLine % TILE_WIDTH == 7 {
+                        backgroundTileRefAddr = backgroundTileRefRowStart + ((backgroundTileRefAddr + 1) % TILE_MAP_HEIGHT);
                     }
 
                 }

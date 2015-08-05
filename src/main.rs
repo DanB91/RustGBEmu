@@ -71,7 +71,7 @@ struct ProgramState {
     isRunning: bool,
     mhz: f32,
 
-    gb: GameBoyState,
+    gb: Box<GameBoyState>,
 }
 
 impl ProgramState {
@@ -83,7 +83,7 @@ impl ProgramState {
             isRunning: true,
             mhz: 0.,
 
-            gb: GameBoyState::new()
+            gb: Box::new(GameBoyState::new())
         }
     }
 }
@@ -198,7 +198,7 @@ fn main() {
     };
 
     let mut prg = ProgramState::new();
-    let mut gb = &mut prg.gb;
+    let mut gb = &mut *prg.gb;
     
 
     gb.mem.romData = romData;

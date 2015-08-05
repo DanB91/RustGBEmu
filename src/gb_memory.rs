@@ -127,17 +127,21 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
             let mut control = 0u8;
 
             //Bit 7 - LCD Enabled
-            control = if lcd.isEnabled { control | 0x80} else {control};
+            control = if lcd.isEnabled { control | (1 << 7)} else {control};
             //TODO: Tile stuff goes here
 
             //Bit 4 - Background Tile Set Select
             control |= lcd.backgroundTileSet << 4;
             //Bit 3 - Background Tile Data Select
             control |= lcd.backgroundTileMap << 3;
+            //Bit 2 - Sprite size
+            control |= match lcd.spriteHeight {
+                SpriteHeight::Short => 0, //bit unset in 8x8 mode
+                SpriteHeight::Tall => (1 << 2), //bit set in 8x16 mode
+            };
 
             //Bit 0 - Background enabled
             control |= if lcd.isBackgroundEnabled {1} else {0};
-
 
             control
         },
@@ -224,7 +228,9 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
             lcd.backgroundTileSet = (byte >> 4) & 1;
             //Bit 3 - Background Tile Map Select
             lcd.backgroundTileMap = (byte >> 3) & 1;
-
+            //Bit 2 - Sprite size
+            lcd.spriteHeight = if testBit!(byte, 2) {SpriteHeight::Tall} 
+                else {SpriteHeight::Short};
             //Bit 0 - Background enabled
             lcd.isBackgroundEnabled = (byte & 1) != 0;
 
