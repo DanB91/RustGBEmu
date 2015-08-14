@@ -297,7 +297,7 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
 
 
 
-pub fn stepLCD(lcd: &mut LCDState, cyclesTakenOfLastInstruction: u32) {
+pub fn stepLCD(lcd: &mut LCDState, interruptsRequested: &mut u8, cyclesTakenOfLastInstruction: u32) {
     use self::LCDMode::*;
 
     if lcd.isEnabled {
@@ -315,7 +315,7 @@ pub fn stepLCD(lcd: &mut LCDState, cyclesTakenOfLastInstruction: u32) {
                 if lcd.currScanLine == 143 {
                     lcd.mode = VBlank; //engage VBlank
                     swap(&mut lcd.screen, &mut lcd.screenBackBuffer); //commit fully drawn screen
-
+                    *interruptsRequested |= 1; //request VBlank interrupt
                 }
                 else {
                     lcd.mode = ScanOAM;

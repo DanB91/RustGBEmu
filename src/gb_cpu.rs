@@ -20,8 +20,9 @@ pub struct CPUState {
     pub H: u8,
     pub L: u8,
     pub totalCycles: u32, //total cycles since game has been loaded
-    pub instructionCycles: u32 //number of cycles in a given instruction
+    pub instructionCycles: u32, //number of cycles in a given instruction
 
+    pub enableInterrupts: bool
 }
 
 impl CPUState {
@@ -38,7 +39,9 @@ impl CPUState {
             H: 0,
             L: 0,
             totalCycles: 0,
-            instructionCycles: 0
+            instructionCycles: 0,
+
+            enableInterrupts: false
         }
     }
 }
@@ -51,7 +54,33 @@ pub enum Flag {
     Carry = 0x10
 }
 
+//addresses of interrupt service routines in order o priority
+static ISRs: [u16;5] = [0x40, 0x48, 0x50, 0x58, 0x60]; 
+
 pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
+
+    if cpu.enableInterrupts {
+        let interruptsToHandle = mem.enabledInterrupts & mem.requestedInterrupts;
+
+        if interruptsToHandle != 0 {
+            pushOnToStack(mem, cpu.PC, &mut cpu.SP); //Save PC
+
+            for i in 0..ISRs.len() {
+                if (interruptsToHandle & (1 << i)) != 0 {
+                    cpu.PC = ISRs[i];
+
+                    //turn off request bit since we are handling the interrupt
+                    mem.requestedInterrupts &= !(1 << i);
+                    cpu.enableInterrupts = false;
+                    break;
+                }
+            }
+
+        }
+
+
+    }
+
     let instructionToExecute = readByteFromMemory(mem, cpu.PC);
 
     let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
@@ -111,12 +140,12 @@ fn popOffOfStack(mem: &MemoryMapState, SP: &mut u16) -> u16 {
     ret
 }
 
-fn enableInterrupts() {
-    //TODO(DanB): To be implemented
+fn enableInterrupts(cpu: &mut CPUState) {
+    cpu.enableInterrupts = true;
 }
 
-fn disableInterrupts() {
-    //TODO(DanB): To be implemented
+fn disableInterrupts(cpu: &mut CPUState) {
+    cpu.enableInterrupts = false;
 }
 
 //returns a tuple of the form (new_PC_value, number_of_cycles_passed)
@@ -601,7 +630,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
      *      
      */
     macro_rules! rotateLeft {
-        ($toRotate: expr) => ({
+        ($toRotate: expr, $shouldClearZero: expr) => ({
             clearFlag!(Neg);
             clearFlag!(Half);
 
@@ -609,7 +638,12 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
 
             $toRotate = ($toRotate << 1) | ($toRotate >> 7);
 
-            setFlagIf!(Zero, $toRotate == 0);
+            if $shouldClearZero {
+                clearFlag!(Zero);
+            }
+            else {
+                setFlagIf!(Zero, $toRotate == 0);
+            }
 
         })
 
@@ -626,16 +660,21 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
      *      
      */
     macro_rules! rotateRight {
-        ($toRotate: expr) => ({
+        ($toRotate: expr, $shouldClearZero: expr) => ({
 
-        clearFlag!(Neg);
-        clearFlag!(Half);
+            clearFlag!(Neg);
+            clearFlag!(Half);
 
-        setFlagIf!(Carry, $toRotate & 0x1 != 0);
+            setFlagIf!(Carry, $toRotate & 0x1 != 0);
 
-        $toRotate = ($toRotate >> 1) | ($toRotate << 7);
+            $toRotate = ($toRotate >> 1) | ($toRotate << 7);
 
-        setFlagIf!(Zero, $toRotate == 0);
+            if $shouldClearZero {
+                clearFlag!(Zero);
+            }
+            else {
+                setFlagIf!(Zero, $toRotate == 0);
+            }
         })
 
     }
@@ -652,9 +691,10 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
      */
     macro_rules! rotateLeftThroughCarry {
 
-        ($toRotate: expr) => ({
+        ($toRotate: expr, $shouldClearZero: expr) => ({
             clearFlag!(Neg);
             clearFlag!(Half);
+            
 
             let temp = if isFlagSet!(Carry) {
                 ($toRotate << 1) | 1
@@ -664,9 +704,15 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
             };
 
             setFlagIf!(Carry, $toRotate & 0x80 != 0);
-            setFlagIf!(Zero, temp == 0);
 
             $toRotate = temp;
+            
+            if $shouldClearZero {
+                clearFlag!(Zero);
+            }
+            else {
+                setFlagIf!(Zero, $toRotate == 0);
+            }
         })
     }
 
@@ -683,7 +729,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
      */
     macro_rules! rotateRightThroughCarry {
 
-        ($toRotate: expr) => ({
+        ($toRotate: expr, $shouldClearZero: expr) => ({
             clearFlag!(Neg);
             clearFlag!(Half);
 
@@ -695,9 +741,15 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
             };
 
             setFlagIf!(Carry, $toRotate & 0x1 != 0);
-            setFlagIf!(Zero, temp == 0);
 
             $toRotate = temp;
+            
+            if $shouldClearZero {
+                clearFlag!(Zero);
+            }
+            else {
+                setFlagIf!(Zero, $toRotate == 0);
+            }
         })
     }
     
@@ -731,7 +783,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
         },
 
         0x7 => { //RLCA
-            rotateLeft!(cpu.A);
+            rotateLeft!(cpu.A, true);
             (cpu.PC.wrapping_add(1), 4)
         },
 
@@ -771,7 +823,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
         },
 
         0xF => { //RRCA
-            rotateRight!(cpu.A);
+            rotateRight!(cpu.A, true);
             (cpu.PC.wrapping_add(1), 4)
         },
 
@@ -809,7 +861,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
         },
 
         0x17 => { //RLA
-            rotateLeftThroughCarry!(cpu.A);
+            rotateLeftThroughCarry!(cpu.A, true);
             (cpu.PC.wrapping_add(1), 4)
         },
 
@@ -845,7 +897,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
         },
 
         0x1F => { //RRA
-            rotateRightThroughCarry!(cpu.A);
+            rotateRightThroughCarry!(cpu.A, true);
             (cpu.PC.wrapping_add(1), 4)
 
         },
@@ -1311,10 +1363,10 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
 
             //manipulate
             match inst {
-                0...7 => rotateLeft!(src), //RLC
-                0x8...0xF => rotateRight!(src), //RRC
-                0x10...0x17 => rotateLeftThroughCarry!(src), //RL
-                0x18...0x1F => rotateRightThroughCarry!(src), //RR
+                0...7 => rotateLeft!(src, false), //RLC
+                0x8...0xF => rotateRight!(src, false), //RRC
+                0x10...0x17 => rotateLeftThroughCarry!(src, false), //RL
+                0x18...0x1F => rotateRightThroughCarry!(src, false), //RR
 
                 0x20...0x27 => { //SLA
                     clearFlag!(Half);
@@ -1426,7 +1478,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
         0xD7 => restart!(0x10), //RST 10H
         0xD8 => returnFromProc!(isFlagSet!(Carry)), //RET C
         0xD9 => { //RETI
-            enableInterrupts();
+            enableInterrupts(cpu);
             returnFromProc!(true)
         }
         0xDA => jumpAbsolute!(isFlagSet!(Carry)), // JP C, a16
@@ -1485,7 +1537,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
             (cpu.PC.wrapping_add(2), 12)
         }
         0xF3 => { //DI
-            disableInterrupts();
+            disableInterrupts(cpu);
             (cpu.PC.wrapping_add(1), 4)
         },
         //No F4
@@ -1509,7 +1561,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
             (cpu.PC.wrapping_add(3), 16)
         },
         0xFB => { //EI
-            enableInterrupts();
+            enableInterrupts(cpu);
             (cpu.PC.wrapping_add(1), 4)
         },
         //No FC

@@ -28,18 +28,18 @@ use gbEmu::gb_lcd::*;
 use gbEmu::gb_joypad::*;
 use gbEmu::gb_util::*;
 
-//use sdl2::render::Renderer;
+use sdl2::render::Renderer;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::timer::{get_performance_counter, get_performance_frequency};
 use sdl2::rect::Rect;
+use sdl2::*;
 
 use sdl2_ttf::Font;
 
 static USAGE: &'static str= "Usage: gbemu path_to_rom";
 static FONT_PATH_STR: &'static str = "res/Gamegirl.ttf";
 
-const GAMEBOY_SCALE: u32 = 2;
+const GAMEBOY_SCALE: u32 = 4;
 const SCREEN_WIDTH: u32 = 160 * GAMEBOY_SCALE;
 const SCREEN_HEIGHT: u32 = 144 * GAMEBOY_SCALE;
 
@@ -63,13 +63,25 @@ impl GameBoyState {
     }
 }
 
-struct ProgramState {
-
+struct DebugInfo {
+    mhz: f32,
     fps: f32,
+    isPaused: bool
+}
+impl DebugInfo {
+    fn new() -> DebugInfo {
+        DebugInfo {
+            fps: 0.,
+            isPaused: false,
+            mhz: 0.
+        }
+    }
+}
+
+struct ProgramState {
     shouldDisplayDebug: bool,
     isPaused: bool,
     isRunning: bool,
-    mhz: f32,
 
     gb: Box<GameBoyState>,
 }
@@ -77,11 +89,9 @@ struct ProgramState {
 impl ProgramState {
     fn new() -> ProgramState {
         ProgramState {
-            fps: 0.,
             shouldDisplayDebug: false,
             isPaused: false,
             isRunning: true,
-            mhz: 0.,
 
             gb: Box::new(GameBoyState::new())
         }
@@ -133,19 +143,19 @@ fn disassemble(cpu: &CPUState, mem: &MemoryMapState) -> String {
 }
 
 //Returns number of seconds for a given performance count range
-fn secondsForCountRange(start: u64, end: u64) -> f32 {
-    ((end as f64 - start as f64) / get_performance_frequency() as f64) as f32
+fn secondsForCountRange(start: u64, end: u64, timer: &TimerSubsystem) -> f32 {
+    ((end as f64 - start as f64) / timer.get_performance_frequency() as f64) as f32
 }
 
-fn sleep(secsToSleep: f32) -> Result<(), String> {
+fn sleep(secsToSleep: f32, timer: &TimerSubsystem) -> Result<(), String> {
     //NOTE(DanB): .005 denotes the amount we will spin manually since
     //      usleep is not 100% accurate 
 
-    let start = get_performance_counter();
+    let start = timer.get_performance_counter();
     let newSecsToSleep = secsToSleep - 0.005f32;
 
     if newSecsToSleep < 0f32 {
-        while secondsForCountRange(start, get_performance_counter()) < secsToSleep {
+        while secondsForCountRange(start, timer.get_performance_counter(), timer) < secsToSleep {
         }
 
         return Ok(());
@@ -167,7 +177,7 @@ fn sleep(secsToSleep: f32) -> Result<(), String> {
         }
         else {
             //spin for the rest of the .005 seconds
-            while secondsForCountRange(start, get_performance_counter()) < secsToSleep {
+            while secondsForCountRange(start, timer.get_performance_counter(), timer) < secsToSleep {
             }
 
             Ok(())
@@ -199,27 +209,38 @@ fn main() {
 
     let mut prg = ProgramState::new();
     let mut gb = &mut *prg.gb;
-    
+
+    let mut dbg = DebugInfo::new();
 
     gb.mem.romData = romData;
 
 
     //init SDL 
-    let mut sdlContext = sdl2::init().video().events().unwrap();
+    let sdlContext = sdl2::init().unwrap();
+
+    let videoSubsystem = sdlContext.video().unwrap();
+    let timer = sdlContext.timer().unwrap();
+    let mut eventPump = sdlContext.event_pump().unwrap();
+
     sdl2_ttf::init().unwrap();
-    let window = sdlContext.window("GB Emu", SCREEN_WIDTH, SCREEN_HEIGHT).position_centered().build().unwrap();
+    let window = videoSubsystem.window("GB Emu", SCREEN_WIDTH, SCREEN_HEIGHT).position_centered().build().unwrap();
+    let (winX, winY) = window.get_position();
     let mut renderer = window.renderer().build().unwrap();
     let font =  Font::from_file(Path::new(FONT_PATH_STR), 12).unwrap();
+
+
+    //init debug screen
+    //let debugWindow = videoSubsystem.window("Debugger", 400, 200).position(winX - 400/2, winY + (SCREEN_HEIGHT as i32)).build().unwrap();
 
     //main loop
     while prg.isRunning {
 
         //get the start time to calculate time
-        let start = get_performance_counter();
+        let start = timer.get_performance_counter();
 
         //TODO: Refactor event handling
         //SDL Events
-        for event in sdlContext.event_pump().poll_iter() {
+        for event in eventPump.poll_iter() {
 
             match event {
                 Event::Quit{..} => prg.isRunning = false,
@@ -295,10 +316,11 @@ fn main() {
             while batchCycles < CYCLES_PER_SLEEP{
                 stepCPU(&mut gb.cpu, &mut gb.mem);
 
-                stepLCD(&mut gb.mem.lcd, gb.cpu.instructionCycles);
+                stepLCD(&mut gb.mem.lcd, &mut gb.mem.requestedInterrupts, gb.cpu.instructionCycles);
                 batchCycles += gb.cpu.instructionCycles;
             } 
         }
+        //--------------------------------------------------------------------
 
 
         //--------------------draw screen-----------------------------------
@@ -329,53 +351,34 @@ fn main() {
             renderer.fill_rect(Rect::new_unwrap(0,0, SCREEN_WIDTH, SCREEN_HEIGHT));
 
         }
+        if gb.mem.inBios {
+            println!("PC: {:X} SCY: {}  B: {}  D: {}", gb.cpu.PC, gb.mem.lcd.scy, gb.cpu.B, gb.cpu.D);
 
-        //display Game Boy debug stats
-        if prg.shouldDisplayDebug { 
-            let toPrint: String;
-
-            let mut instructionToPrint = readByteFromMemory(&mut gb.mem, gb.cpu.PC) as u16;
-
-            if instructionToPrint == 0xCB {
-                instructionToPrint =  word(0xCBu8, readByteFromMemory(&mut gb.mem, gb.cpu.PC.wrapping_add(1)))
-            }
-
-            //print debug details
-            toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
-                              format!("Opcode:{:X}", instructionToPrint),
-                              format!("Total Cycles: {}, Cycles just executed: {}", gb.cpu.totalCycles, gb.cpu.instructionCycles),
-                              format!("Mhz {:.*}", 2, prg.mhz),
-                              format!("Currently in BIOS: {}", gb.mem.inBios),
-                              format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, gb.cpu.F), isFlagSet(Flag::Neg, gb.cpu.F), isFlagSet(Flag::Half, gb.cpu.F), isFlagSet(Flag::Carry, gb.cpu.F)),
-                              format!("PC: {:X}\tSP: {:X}", gb.cpu.PC, gb.cpu.SP),
-                              format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", gb.cpu.A, gb.cpu.F, gb.cpu.B, gb.cpu.C),
-                              format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", gb.cpu.D, gb.cpu.E, gb.cpu.H, gb.cpu.L),
-                              format!("FPS: {}, Emulator Paused: {}", prg.fps, prg.isPaused));
-
-
-
-            let fontSurf =  font.render_str_blended_wrapped(&toPrint, sdl2::pixels::Color::RGBA(255,0,0,255), SCREEN_WIDTH).unwrap();
-            let mut fontTex = renderer.create_texture_from_surface(&fontSurf).unwrap();
-
-            let (texW, texH) = { let q = fontTex.query(); (q.width, q.height)};
-            renderer.copy(&mut fontTex, None, sdl2::rect::Rect::new(0, 0, texW, texH).unwrap());
         }
+        //---------------------------------------------------------------------------------------------
+
+        //-----------------display Game Boy debug stats--------------------------------------
+        if prg.shouldDisplayDebug { 
+            drawDebugInfo(&dbg, gb, &font, &mut renderer);
+        }
+        //--------------------------------------------------------------------------------------
 
         renderer.present();
 
-        let secsElapsed = secondsForCountRange(start, get_performance_counter());
+        let secsElapsed = secondsForCountRange(start, timer.get_performance_counter(), &timer);
         let targetSecs =  batchCycles as f32 / CLOCK_SPEED_HZ; 
 
         if secsElapsed < targetSecs {
             let secsToSleep = targetSecs - secsElapsed;
-            sleep(secsToSleep).unwrap();
+            sleep(secsToSleep, &timer).unwrap();
         }
 
-        //TODO: clock speed and prg.fps lag one frame behind
-        let secsElapsed = secondsForCountRange(start, get_performance_counter());
+        //TODO: clock speed and dbg.fps lag one frame behind
+        let secsElapsed = secondsForCountRange(start, timer.get_performance_counter(), &timer);
         let hz = batchCycles as f32 / secsElapsed;
-        prg.mhz = hz / 1000000f32;
-        prg.fps = 1f32/secsElapsed;
+        dbg.mhz = hz / 1000000f32;
+        dbg.fps = 1f32/secsElapsed;
+        dbg.isPaused = prg.isPaused;
 
 
     }
@@ -387,5 +390,35 @@ fn main() {
 
 }
 
+fn drawDebugInfo(dbg: &DebugInfo, gb: &GameBoyState, font: &Font, renderer: &mut Renderer) {
+    let toPrint: String;
+
+    let mut instructionToPrint = readByteFromMemory(&gb.mem, gb.cpu.PC) as u16;
+
+    if instructionToPrint == 0xCB {
+        instructionToPrint =  word(0xCBu8, readByteFromMemory(&gb.mem, gb.cpu.PC.wrapping_add(1)))
+    }
+    //print debug details
+    toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
+                      format!("Opcode:{:X}", instructionToPrint),
+                      format!("Total Cycles: {}, Cycles just executed: {}", gb.cpu.totalCycles, gb.cpu.instructionCycles),
+                      format!("Mhz {:.*}", 2, dbg.mhz),
+                      format!("Currently in BIOS: {}", gb.mem.inBios),
+                      format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, gb.cpu.F), isFlagSet(Flag::Neg, gb.cpu.F), isFlagSet(Flag::Half, gb.cpu.F), isFlagSet(Flag::Carry, gb.cpu.F)),
+                      format!("PC: {:X}\tSP: {:X}", gb.cpu.PC, gb.cpu.SP),
+                      format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", gb.cpu.A, gb.cpu.F, gb.cpu.B, gb.cpu.C),
+                      format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", gb.cpu.D, gb.cpu.E, gb.cpu.H, gb.cpu.L),
+                      format!("SCX: {}, SCY: {}", gb.mem.lcd.scx, gb.mem.lcd.scy),
+                      format!("FPS: {}, Paused: {}", dbg.fps, dbg.isPaused));
+
+
+
+    let fontSurf =  font.render_str_blended_wrapped(&toPrint, sdl2::pixels::Color::RGBA(255,0,0,255), SCREEN_WIDTH).unwrap();
+    let mut fontTex = renderer.create_texture_from_surface(&fontSurf).unwrap();
+
+    let (texW, texH) = { let q = fontTex.query(); (q.width, q.height)};
+    renderer.copy(&mut fontTex, None, sdl2::rect::Rect::new(0, 0, texW, texH).unwrap());
+
+}
 
 

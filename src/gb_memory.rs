@@ -13,6 +13,9 @@ pub struct MemoryMapState {
     pub romData: Vec<u8>,
     pub inBios: bool,
 
+    pub requestedInterrupts: u8,
+    pub enabledInterrupts: u8,
+
     pub lcd: LCDState,
     pub joypad: JoypadState
 
@@ -26,6 +29,9 @@ impl MemoryMapState {
             zeroPageRAM: [0;0x7F],
             romData: vec![],
             inBios: true,
+
+            requestedInterrupts: 0,
+            enabledInterrupts: 0,
 
             lcd: LCDState::new(),
             joypad: JoypadState::new()
@@ -122,7 +128,8 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
             else {
                 0xFF
             }*/
-        }
+        },
+        0xFF0F => memory.requestedInterrupts,
         0xFF40 => { //LCD Control
             let mut control = 0u8;
 
@@ -190,6 +197,7 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0xFF49 => u8ForColorPalette(&lcd.spritePalette1),
         0xFF50 => if memory.inBios {0} else {1},
         0xFF80...0xFFFE => memory.zeroPageRAM[i - 0xFF80],
+        0xFFFF => memory.enabledInterrupts,
         _ => 0
     }
 }
@@ -211,14 +219,16 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
         0xFE00...0xFE9F /*if lcd.mode != ScanVRAMAndOAM && lcd.mode != ScanOAM*/ => 
             lcd.oam[i - 0xFE00] = byte,
         0xFF00 => {//Joypad Register
-            match byte & 0x30 { //only look at bits 4 and 5
-                0x20 => joypad.selectedButtonGroup = ButtonGroup::DPad,
-                0x10 => joypad.selectedButtonGroup = ButtonGroup::FaceButtons,
-                0 => joypad.selectedButtonGroup = ButtonGroup::Nothing,
-                _ => panic!("This really would be an error in the compiler if we hit here")
-            }
+            joypad.selectedButtonGroup =
+                match byte & 0x30 { //only look at bits 4 and 5
+                    0x20 => ButtonGroup::DPad,
+                    0x10 => ButtonGroup::FaceButtons,
+                    0x30 | 0 => ButtonGroup::Nothing,
+                    _ => panic!("This really would be an error in the compiler if we hit here")
+                }
 
-        }
+        },
+        0xFF0F => memory.requestedInterrupts = byte,
         0xFF40 => { //LCD Control
 
             //Bit 7 - LCD Enabled
@@ -243,7 +253,8 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
         0xFF49 => updateColorPaletteFromU8(&mut lcd.spritePalette1, byte),
         //TODO: Implement writing to LCD status
         0xFF50 => memory.inBios = if byte != 0 {false} else {true},
-        0xFF80...0xFFFE => memory.zeroPageRAM[i - 0xFF80] = byte,     
+        0xFF80...0xFFFE => memory.zeroPageRAM[i - 0xFF80] = byte, 
+        0xFFFF => memory.enabledInterrupts = byte,
         _ => {}
     }
 }
