@@ -17,8 +17,8 @@ mod sdl2_ttf;
 use std::env;
 use std::path::Path;
 
-use libc::funcs::posix88::unistd::usleep;
-use libc::consts::os::posix88::EINTR;
+use libc::usleep;
+use libc::EINTR;
 
 use errno::*;
 
@@ -29,7 +29,7 @@ use gbEmu::gb_joypad::*;
 use gbEmu::gb_util::*;
 
 use sdl2::render::Renderer;
-use sdl2::event::Event;
+use sdl2::event::*;
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use sdl2::*;
@@ -42,6 +42,9 @@ static FONT_PATH_STR: &'static str = "res/Gamegirl.ttf";
 const GAMEBOY_SCALE: u32 = 4;
 const SCREEN_WIDTH: u32 = 160 * GAMEBOY_SCALE;
 const SCREEN_HEIGHT: u32 = 144 * GAMEBOY_SCALE;
+
+const DEBUG_WIDTH: u32 = 400;
+const DEBUG_HEIGHT: u32 = 200;
 
 const SECONDS_PER_FRAME: f32 = 1f32/60f32;
 const CYCLES_PER_SLEEP: u32 = 60000;
@@ -66,14 +69,21 @@ impl GameBoyState {
 struct DebugInfo {
     mhz: f32,
     fps: f32,
-    isPaused: bool
+    isPaused: bool,
+    mouseX: u32,
+    mouseY: u32,
+
+    colorMouseIsOn: &'static str 
 }
 impl DebugInfo {
     fn new() -> DebugInfo {
         DebugInfo {
             fps: 0.,
             isPaused: false,
-            mhz: 0.
+            mhz: 0.,
+            mouseX: 0,
+            mouseY: 0,
+            colorMouseIsOn: ""
         }
     }
 }
@@ -144,18 +154,18 @@ fn disassemble(cpu: &CPUState, mem: &MemoryMapState) -> String {
 
 //Returns number of seconds for a given performance count range
 fn secondsForCountRange(start: u64, end: u64, timer: &TimerSubsystem) -> f32 {
-    ((end as f64 - start as f64) / timer.get_performance_frequency() as f64) as f32
+    ((end as f64 - start as f64) / timer.performance_frequency() as f64) as f32
 }
 
 fn sleep(secsToSleep: f32, timer: &TimerSubsystem) -> Result<(), String> {
     //NOTE(DanB): .005 denotes the amount we will spin manually since
     //      usleep is not 100% accurate 
 
-    let start = timer.get_performance_counter();
+    let start = timer.performance_counter();
     let newSecsToSleep = secsToSleep - 0.005f32;
 
     if newSecsToSleep < 0f32 {
-        while secondsForCountRange(start, timer.get_performance_counter(), timer) < secsToSleep {
+        while secondsForCountRange(start, timer.performance_counter(), timer) < secsToSleep {
         }
 
         return Ok(());
@@ -177,7 +187,7 @@ fn sleep(secsToSleep: f32, timer: &TimerSubsystem) -> Result<(), String> {
         }
         else {
             //spin for the rest of the .005 seconds
-            while secondsForCountRange(start, timer.get_performance_counter(), timer) < secsToSleep {
+            while secondsForCountRange(start, timer.performance_counter(), timer) < secsToSleep {
             }
 
             Ok(())
@@ -224,19 +234,21 @@ fn main() {
 
     sdl2_ttf::init().unwrap();
     let window = videoSubsystem.window("GB Emu", SCREEN_WIDTH, SCREEN_HEIGHT).position_centered().build().unwrap();
-    let (winX, winY) = window.get_position();
+    let windowID = window.id();
+    let (winX, winY) = window.position();
     let mut renderer = window.renderer().build().unwrap();
     let font =  Font::from_file(Path::new(FONT_PATH_STR), 12).unwrap();
 
 
     //init debug screen
-    //let debugWindow = videoSubsystem.window("Debugger", 400, 200).position(winX - 400/2, winY + (SCREEN_HEIGHT as i32)).build().unwrap();
+    let debugWindow = videoSubsystem.window("Debugger", DEBUG_WIDTH, DEBUG_HEIGHT).position(winX - 400/2, winY + (SCREEN_HEIGHT as i32)).build().unwrap();
+    let mut debugRenderer = debugWindow.renderer().build().unwrap();
 
     //main loop
     while prg.isRunning {
 
         //get the start time to calculate time
-        let start = timer.get_performance_counter();
+        let start = timer.performance_counter();
 
         //TODO: Refactor event handling
         //SDL Events
@@ -244,6 +256,17 @@ fn main() {
 
             match event {
                 Event::Quit{..} => prg.isRunning = false,
+
+                Event::Window{win_event_id, ..} => {
+                    //TODO: close debug window, don't just quit app
+                    match win_event_id {
+                        WindowEventId::Close => {
+                            prg.isRunning = false;
+                        }
+
+                        _ => {}
+                    }
+                },
 
             
                 Event::KeyUp{keycode: keyOpt, ..} => {
@@ -303,6 +326,26 @@ fn main() {
                     }
                 },
 
+                Event::MouseMotion{x, y, window_id, ..} if window_id == windowID => {
+
+                    let gameBoyXPixel = (x as u32 / GAMEBOY_SCALE) as usize; 
+                    let gameBoyYPixel = (y as u32 / GAMEBOY_SCALE) as usize; 
+
+                    dbg.mouseX = gameBoyXPixel as u32;
+                    dbg.mouseY = gameBoyYPixel as u32;
+
+                    let pixel = gb.mem.lcd.screen[gameBoyYPixel][gameBoyXPixel];
+
+                    dbg.colorMouseIsOn = match pixel {
+                        WHITE => "White",
+                        LIGHT_GRAY => "Light Gray",
+                        DARK_GRAY => "Dark Gray",
+                        BLACK => "Black",
+                        _ => "lolwut"
+                    };
+
+                },
+
                 _ => {}
             }   
 
@@ -323,7 +366,8 @@ fn main() {
         //--------------------------------------------------------------------
 
 
-        //--------------------draw screen-----------------------------------
+
+        //--------------------draw GB screen-----------------------------------
         renderer.clear();
 
         //draw clear screen if lcd is disabled
@@ -355,17 +399,19 @@ fn main() {
             println!("PC: {:X} SCY: {}  B: {}  D: {}", gb.cpu.PC, gb.mem.lcd.scy, gb.cpu.B, gb.cpu.D);
 
         }
-        //---------------------------------------------------------------------------------------------
+        //------------------------------------------------------------------------
 
-        //-----------------display Game Boy debug stats--------------------------------------
-        if prg.shouldDisplayDebug { 
-            drawDebugInfo(&dbg, gb, &font, &mut renderer);
-        }
-        //--------------------------------------------------------------------------------------
+        //--------------------draw debug screen-----------------------------------
+        
+        drawDebugInfo(&dbg, gb, &font, &mut debugRenderer);
+
+
+
+        //---------------------------------------------------------------------
 
         renderer.present();
 
-        let secsElapsed = secondsForCountRange(start, timer.get_performance_counter(), &timer);
+        let secsElapsed = secondsForCountRange(start, timer.performance_counter(), &timer);
         let targetSecs =  batchCycles as f32 / CLOCK_SPEED_HZ; 
 
         if secsElapsed < targetSecs {
@@ -374,7 +420,7 @@ fn main() {
         }
 
         //TODO: clock speed and dbg.fps lag one frame behind
-        let secsElapsed = secondsForCountRange(start, timer.get_performance_counter(), &timer);
+        let secsElapsed = secondsForCountRange(start, timer.performance_counter(), &timer);
         let hz = batchCycles as f32 / secsElapsed;
         dbg.mhz = hz / 1000000f32;
         dbg.fps = 1f32/secsElapsed;
@@ -393,13 +439,16 @@ fn main() {
 fn drawDebugInfo(dbg: &DebugInfo, gb: &GameBoyState, font: &Font, renderer: &mut Renderer) {
     let toPrint: String;
 
+    renderer.clear();
+    renderer.set_draw_color(WHITE);
+    renderer.fill_rect(Rect::new_unwrap(0,0, DEBUG_WIDTH, DEBUG_HEIGHT));
     let mut instructionToPrint = readByteFromMemory(&gb.mem, gb.cpu.PC) as u16;
 
     if instructionToPrint == 0xCB {
         instructionToPrint =  word(0xCBu8, readByteFromMemory(&gb.mem, gb.cpu.PC.wrapping_add(1)))
     }
     //print debug details
-    toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
+    toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
                       format!("Opcode:{:X}", instructionToPrint),
                       format!("Total Cycles: {}, Cycles just executed: {}", gb.cpu.totalCycles, gb.cpu.instructionCycles),
                       format!("Mhz {:.*}", 2, dbg.mhz),
@@ -409,7 +458,9 @@ fn drawDebugInfo(dbg: &DebugInfo, gb: &GameBoyState, font: &Font, renderer: &mut
                       format!("A: {:X}\tF: {:X}\tB: {:X}\tC: {:X}", gb.cpu.A, gb.cpu.F, gb.cpu.B, gb.cpu.C),
                       format!("D: {:X}\tE: {:X}\tH: {:X}\tL: {:X}", gb.cpu.D, gb.cpu.E, gb.cpu.H, gb.cpu.L),
                       format!("SCX: {}, SCY: {}", gb.mem.lcd.scx, gb.mem.lcd.scy),
-                      format!("FPS: {}, Paused: {}", dbg.fps, dbg.isPaused));
+                      format!("FPS: {}, Paused: {}", dbg.fps, dbg.isPaused),
+                      format!("Mouse X: {}, Mouse Y: {}", dbg.mouseX, dbg.mouseY),
+                      format!("Color Mouse is on: {}", dbg.colorMouseIsOn));
 
 
 
@@ -419,6 +470,7 @@ fn drawDebugInfo(dbg: &DebugInfo, gb: &GameBoyState, font: &Font, renderer: &mut
     let (texW, texH) = { let q = fontTex.query(); (q.width, q.height)};
     renderer.copy(&mut fontTex, None, sdl2::rect::Rect::new(0, 0, texW, texH).unwrap());
 
+    renderer.present();
 }
 
 

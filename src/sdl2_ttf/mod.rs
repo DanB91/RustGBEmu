@@ -15,6 +15,7 @@ use sdl2_sys::pixels::SDL_Color;
 use sdl2::rwops::RWops;
 use sdl2::version::Version;
 use sdl2::SdlResult;
+use sdl2::ErrorMessage;
 
 // Setup linking for all targets.
 #[cfg(target_os="macos")]
@@ -92,7 +93,7 @@ pub fn init() -> SdlResult<bool> {
                 Ok(true)
             }
             else {
-                Err(format!("SDL TTF failed to init with error: {}", get_error()))
+                Err(ErrorMessage(format!("SDL TTF failed to init with error: {}", get_error())))
             }
         }
     }
