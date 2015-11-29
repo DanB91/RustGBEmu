@@ -2,3 +2,4 @@
 *.swo
 target
 Cargo.lock
+dump.txt
