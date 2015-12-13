@@ -5,9 +5,9 @@ use std::mem::swap;
 //Holds the state of the  screen and controller
 pub struct LCDState {
     //rename to backgroundPalette
-    pub palette: [Color;4], //color palette
-    pub spritePalette0: [Color;4], 
-    pub spritePalette1: [Color;4],
+    pub palette: [PaletteColor;4], //color palette
+    pub spritePalette0: [PaletteColor;4], 
+    pub spritePalette1: [PaletteColor;4],
     pub videoRAM: [u8;0x2000],
     pub oam: [u8;0xA0], //sprite memory
     pub mode: LCDMode, 
@@ -39,14 +39,13 @@ pub enum SpriteHeight {
     Tall = 16
 }
 
-//TODO: Rename to PaletteColor
-pub type Color = sdl2::pixels::Color;
-pub const WHITE: Color = sdl2::pixels::Color::RGBA(255, 255, 255, 255);
-pub const LIGHT_GRAY: Color = sdl2::pixels::Color::RGBA(170,170,170,255);
-pub const DARK_GRAY: Color = sdl2::pixels::Color::RGBA(85,85,85,255);
-pub const BLACK: Color = sdl2::pixels::Color::RGBA(0,0,0,255);
+pub type PaletteColor = sdl2::pixels::Color;
+pub const WHITE: PaletteColor = sdl2::pixels::Color::RGBA(255, 255, 255, 255);
+pub const LIGHT_GRAY: PaletteColor = sdl2::pixels::Color::RGBA(170,170,170,255);
+pub const DARK_GRAY: PaletteColor = sdl2::pixels::Color::RGBA(85,85,85,255);
+pub const BLACK: PaletteColor = sdl2::pixels::Color::RGBA(0,0,0,255);
 
-pub type LCDScreen = [[Color;160];144]; 
+pub type LCDScreen = [[PaletteColor;160];144]; 
 pub const BLANK_SCREEN: LCDScreen = [[WHITE;160];144];
 
 const TILE_WIDTH: usize = 8;
@@ -162,7 +161,7 @@ use self::ColorNumber::*;
 use self::SpritePalette::*;
 use self::SpriteHeight::*;
 
-fn spritePaletteColorForColorNumber(colorNum: ColorNumber, sprite: &Sprite, lcd: &mut LCDState) -> Color {
+fn spritePaletteColorForColorNumber(colorNum: ColorNumber, sprite: &Sprite, lcd: &mut LCDState) -> PaletteColor {
     debug_assert!(colorNum != Color0, "Color0 is not a valid palette color for sprites"); //Color0 is not a valid palette color for sprites
 
     match sprite.selectedSpritePalette {
@@ -171,7 +170,7 @@ fn spritePaletteColorForColorNumber(colorNum: ColorNumber, sprite: &Sprite, lcd:
     }
 }
 
-fn backgroundPaletteColorForColorNumber(colorNum: ColorNumber, lcd: &mut LCDState) -> Color {
+fn backgroundPaletteColorForColorNumber(colorNum: ColorNumber, lcd: &mut LCDState) -> PaletteColor {
     lcd.palette[colorNum as usize]
 }
 
@@ -297,7 +296,7 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
 
 
 
-pub fn stepLCD(lcd: &mut LCDState, interruptsRequested: &mut u8, cyclesTakenOfLastInstruction: u32) {
+pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLastInstruction: u32) {
     use self::LCDMode::*;
 
     if lcd.isEnabled {
@@ -315,7 +314,7 @@ pub fn stepLCD(lcd: &mut LCDState, interruptsRequested: &mut u8, cyclesTakenOfLa
                 if lcd.currScanLine == 143 {
                     lcd.mode = VBlank; //engage VBlank
                     swap(&mut lcd.screen, &mut lcd.screenBackBuffer); //commit fully drawn screen
-                    *interruptsRequested |= 1; //request VBlank interrupt
+                    *requestedInterrupts |= 1; //request VBlank interrupt
                 }
                 else {
                     lcd.mode = ScanOAM;

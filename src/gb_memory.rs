@@ -76,7 +76,7 @@ static BIOS: [u8; 0x100] = [
     0xFB, 0x86, 0x20, 0xFE, 0x3E, 0x01, 0xE0, 0x50
 ];
 
-fn u8ForColorPalette(colorPalette: &[Color]) -> u8 {
+fn u8ForColorPalette(colorPalette: &[PaletteColor]) -> u8 {
     let mut colorReg = 0;
 
     for i in 0..colorPalette.len() {
@@ -95,7 +95,7 @@ fn u8ForColorPalette(colorPalette: &[Color]) -> u8 {
     
 }
 
-fn updateColorPaletteFromU8(colorPalette: &mut [Color], val: u8) {
+fn updateColorPaletteFromU8(colorPalette: &mut [PaletteColor], val: u8) {
     for i in 0..colorPalette.len() {
         let colorNum = (val >> 2 * i) & 3; 
 
@@ -136,14 +136,12 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000],
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000], //echo of internal RAM 
         0xFE00...0xFE9F => {
-            lcd.oam[i - 0xFE00]
-        //TODO: Enable commented out code
-         /*   if lcd.mode != ScanVRAMAndOAM && lcd.mode != ScanOAM {
+            if lcd.mode != ScanVRAMAndOAM && lcd.mode != ScanOAM {
                 lcd.oam[i - 0xFE00]
             }
             else {
                 0xFF
-            }*/
+            }
         },
         0xFF0F => memory.requestedInterrupts,
         0xFF40 => { //LCD Control
@@ -172,7 +170,6 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0xFF00 => { //Joypad register
             let mut joypReg = 0u8;
 
-            //TODO put breakpoint here
             match joypad.selectedButtonGroup {
                 ButtonGroup::DPad => {
                     joypReg = 0x20;
@@ -231,8 +228,7 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
         0x8000...0x9FFF if lcd.mode != ScanVRAMAndOAM => lcd.videoRAM[i - 0x8000] = byte,
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
-        //TODO: Enable commented out code
-        0xFE00...0xFE9F /*if lcd.mode != ScanVRAMAndOAM && lcd.mode != ScanOAM*/ => 
+        0xFE00...0xFE9F if lcd.mode != ScanVRAMAndOAM && lcd.mode != ScanOAM => 
             lcd.oam[i - 0xFE00] = byte,
         0xFF00 => {//Joypad Register
             joypad.selectedButtonGroup =

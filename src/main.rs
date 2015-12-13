@@ -32,7 +32,6 @@ use sdl2::*;
 
 static USAGE: &'static str= "Usage: gbemu path_to_rom";
 
-const GAMEBOY_SCALE: u32 = 4;
 const SCREEN_WIDTH: u32 = 160 * GAMEBOY_SCALE;
 const SCREEN_HEIGHT: u32 = 144 * GAMEBOY_SCALE;
 
@@ -107,7 +106,7 @@ fn main() {
 
 
     //init debug screen
-    let mut dbg = initDebug(0, SCREEN_HEIGHT as i32, SCREEN_WIDTH, SCREEN_HEIGHT / 4);
+    let mut dbg = initDebug(0, SCREEN_HEIGHT as i32, SCREEN_WIDTH, SCREEN_HEIGHT / 2);
 
     //main loop
     while prg.isRunning {
@@ -122,7 +121,6 @@ fn main() {
                 Event::Quit{..} => prg.isRunning = false,
 
                 Event::Window{win_event_id, ..} => {
-                    //TODO: close debug window, don't just quit app
                     match win_event_id {
                         WindowEventId::Close => {
                             prg.isRunning = false;
@@ -281,10 +279,6 @@ fn main() {
 
                 y += GAMEBOY_SCALE;
             }
-
-        }
-        if gb.mem.inBios {
-            println!("PC: {:X} SCY: {}  B: {}  D: {}", gb.cpu.PC, gb.mem.lcd.scy, gb.cpu.B, gb.cpu.D);
 
         }
         //------------------------------------------------------------------------

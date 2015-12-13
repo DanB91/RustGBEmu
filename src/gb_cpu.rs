@@ -54,7 +54,7 @@ pub enum Flag {
     Carry = 0x10
 }
 
-//addresses of interrupt service routines in order o priority
+//addresses of interrupt service routines in order of priority
 static ISRs: [u16;5] = [0x40, 0x48, 0x50, 0x58, 0x60]; 
 
 pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
@@ -65,9 +65,9 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
         if interruptsToHandle != 0 {
             pushOnToStack(mem, cpu.PC, &mut cpu.SP); //Save PC
 
-            for i in 0..ISRs.len() {
+            for (i, ISR) in ISRs.iter().enumerate() {
                 if (interruptsToHandle & (1 << i)) != 0 {
-                    cpu.PC = ISRs[i];
+                    cpu.PC = *ISR;
 
                     //turn off request bit since we are handling the interrupt
                     mem.requestedInterrupts &= !(1 << i);
@@ -595,12 +595,15 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
             clearFlag!(Zero);
             clearFlag!(Neg);
 
-            //only set the Half and Carry flags on positive numbers
-            //TODO(DanB): Not sure if this is correct.  Documentation is poor
-            //and every emulator seems to set these differently
+
+
+            //NOTE: Documentation is poor on this, but
+            //      previously the H and C bits were only set on positive nubmers. However
+            //      according to the 03-ops ROM, these bits are set on both negative and
+            //      positive nubmers.  
 
             //set/clear half
-            if bitsCarried & 0x10 != 0 && addend > 0 {
+            if bitsCarried & 0x10 != 0 {
                 setFlag!(Half);
             }
             else {
@@ -608,7 +611,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
             }
 
             //set/clear carry
-            if bitsCarried & 0x100 != 0 && addend > 0 {
+            if bitsCarried & 0x100 != 0 {
                 setFlag!(Carry);
             }
             else {

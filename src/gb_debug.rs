@@ -35,9 +35,10 @@ pub struct DebugInfo {
 
 }
 
+//TODO: figure out font proportions
 pub fn initDebug(xpos: i32, ypos: i32, debugWidth: u32, debugHeight: u32) -> DebugInfo {
     sdl2_ttf::init().unwrap();
-    let font =  Font::from_file(Path::new(FONT_PATH_STR), 12).unwrap();
+    let font =  Font::from_file(Path::new(FONT_PATH_STR), debugHeight as i32/16).unwrap();
 
     DebugInfo {
         fps: 0.,
