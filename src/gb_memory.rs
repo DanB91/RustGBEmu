@@ -276,7 +276,9 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
         0x8000...0x9FFF if lcd.mode != ScanVRAMAndOAM => lcd.videoRAM[i - 0x8000] = byte,
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
-        0xFE00...0xFE9F if lcd.mode != ScanVRAMAndOAM && lcd.mode != ScanOAM => 
+        //TODO: Shouldn't be able to write to OAM memory during these modes.
+        //      Enabling commented out code breaks sprites.  Figure out why...
+        0xFE00...0xFE9F /*if lcd.mode != ScanVRAMAndOAM && lcd.mode != ScanOAM*/ => 
             lcd.oam[i - 0xFE00] = byte,
         0xFF00 => {//Joypad Register
             joypad.selectedButtonGroup =
