@@ -91,6 +91,9 @@ fn main() {
 
     gb.mem.romData = romData;
 
+    let mut cyclesPerDividerIncrement = 0u32;
+    let mut cyclesPerTimerIncrement = 0u32;
+
     //init SDL 
     let sdlContext = sdl2::init().unwrap();
 
@@ -193,15 +196,40 @@ fn main() {
                                     }
                                 }
 
-                                Keycode::Up => gb.mem.joypad.up = ButtonState::Down,
-                                Keycode::Down => gb.mem.joypad.down = ButtonState::Down,
-                                Keycode::Left => gb.mem.joypad.left = ButtonState::Down,
-                                Keycode::Right => gb.mem.joypad.right = ButtonState::Down,
+                                Keycode::Up => {
+                                    gb.mem.joypad.up = ButtonState::Down;
+                                    gb.mem.requestedInterrupts &= 1 << 4;
+                                },
+                                Keycode::Down => {
+                                    gb.mem.joypad.down = ButtonState::Down;
+                                    gb.mem.requestedInterrupts &= 1 << 4;
+                                },
+                                Keycode::Left => {
+                                    gb.mem.joypad.left = ButtonState::Down;
+                                    gb.mem.requestedInterrupts &= 1 << 4;
+                                },
+                                Keycode::Right => {
+                                    gb.mem.joypad.right = ButtonState::Down;
+                                    gb.mem.requestedInterrupts &= 1 << 4;
+                                },
 
-                                Keycode::X => gb.mem.joypad.a = ButtonState::Down,
-                                Keycode::Z => gb.mem.joypad.b = ButtonState::Down,
-                                Keycode::Return => gb.mem.joypad.start = ButtonState::Down,
-                                Keycode::RShift => gb.mem.joypad.select = ButtonState::Down,
+                                Keycode::X => {
+                                    gb.mem.joypad.a = ButtonState::Down;
+                                    gb.mem.requestedInterrupts &= 1 << 4;
+                                },
+                                Keycode::Z => {
+                                    gb.mem.joypad.b = ButtonState::Down;
+                                    gb.mem.requestedInterrupts &= 1 << 4;
+                                },
+                                Keycode::Return => {
+                                    gb.mem.joypad.start = ButtonState::Down;
+                                    gb.mem.requestedInterrupts &= 1 << 4;
+                                }
+                                Keycode::RShift => {
+                                    gb.mem.joypad.select = ButtonState::Down;
+                                    gb.mem.requestedInterrupts &= 1 << 4;
+                                }
+
                                 _ => {}
                             }
                         }
@@ -250,6 +278,31 @@ fn main() {
 
                 stepLCD(&mut gb.mem.lcd, &mut gb.mem.requestedInterrupts, gb.cpu.instructionCycles);
                 batchCycles += gb.cpu.instructionCycles;
+
+                cyclesPerDividerIncrement += gb.cpu.instructionCycles;
+
+                if cyclesPerDividerIncrement >= CYCLES_PER_DIVIDER_INCREMENT {
+                    gb.mem.divider = gb.mem.divider.wrapping_add(1);
+                    cyclesPerDividerIncrement -= CYCLES_PER_DIVIDER_INCREMENT;
+                }
+                
+                //if timer is enabled...
+                //TODO: Timer may need to be more accurate in the case
+                //      when the timer is slowed down or sped up.  Cycles may need to be reset.
+                if gb.mem.timerEnabled {
+                    //decide how fast to count
+                    cyclesPerTimerIncrement += gb.cpu.instructionCycles;
+
+                    if cyclesPerTimerIncrement >= (gb.mem.timerMode as u32) {
+                        gb.mem.timerCounter = gb.mem.timerCounter.wrapping_add(1);
+
+                        if gb.mem.timerCounter == 0 {
+                            gb.mem.timerCounter = gb.mem.timerModulo;
+                            gb.mem.requestedInterrupts |= 1 << 2;
+                            cyclesPerTimerIncrement -= gb.mem.timerMode as u32; 
+                        }
+                    }
+                }
             } 
         }
         //--------------------------------------------------------------------

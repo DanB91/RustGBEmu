@@ -5,6 +5,19 @@ use std::io::Read;
 use gb_util::*;
 use gb_lcd::*;
 use gb_joypad::*;
+use gb_cpu::CLOCK_SPEED_HZ;
+
+pub const CYCLES_PER_DIVIDER_INCREMENT: u32 = 256;
+
+
+//tells how fast to increment the timer
+#[derive(Copy, Clone)]
+pub enum TimerMode  {
+    Mode0 =  CLOCK_SPEED_HZ as isize / 1024,
+    Mode1 =  CLOCK_SPEED_HZ as isize / 16,
+    Mode2 =  CLOCK_SPEED_HZ as isize / 64,
+    Mode3 =  CLOCK_SPEED_HZ as isize / 256
+}
 
 //NOTE(DanB):anything accessed by MMU goes in here including LCD related function
 pub struct MemoryMapState {
@@ -17,7 +30,14 @@ pub struct MemoryMapState {
     pub enabledInterrupts: u8,
 
     pub lcd: LCDState,
-    pub joypad: JoypadState
+    pub joypad: JoypadState,
+
+    //timer registers
+    pub divider: u8, //DIV
+    pub timerCounter: u8, //TIMA
+    pub timerModulo: u8, //TMA
+    pub timerMode: TimerMode, 
+    pub timerEnabled: bool, 
 
 }
 
@@ -34,7 +54,13 @@ impl MemoryMapState {
             enabledInterrupts: 0,
 
             lcd: LCDState::new(),
-            joypad: JoypadState::new()
+            joypad: JoypadState::new(),
+
+            divider: 0,
+            timerCounter: 0,
+            timerModulo: 0,
+            timerMode: TimerMode::Mode0, 
+            timerEnabled: false
         }
     }
 
@@ -143,30 +169,6 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
                 0xFF
             }
         },
-        0xFF0F => memory.requestedInterrupts,
-        0xFF40 => { //LCD Control
-            let mut control = 0u8;
-
-            //Bit 7 - LCD Enabled
-            control = if lcd.isEnabled { control | (1 << 7)} else {control};
-            //TODO: Tile stuff goes here
-
-            //Bit 4 - Background Tile Set Select
-            control |= lcd.backgroundTileSet << 4;
-            //Bit 3 - Background Tile Data Select
-            control |= lcd.backgroundTileMap << 3;
-            //Bit 2 - Sprite size
-            control |= match lcd.spriteHeight {
-                SpriteHeight::Short => 0, //bit unset in 8x8 mode
-                SpriteHeight::Tall => (1 << 2), //bit set in 8x16 mode
-            };
-
-            //Bit 0 - Background enabled
-            control |= if lcd.isBackgroundEnabled {1} else {0};
-
-            control
-        },
-
         0xFF00 => { //Joypad register
             let mut joypReg = 0u8;
 
@@ -194,9 +196,54 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
 
             joypReg
         },
+        0xFF04 => memory.divider,
+        0xFF05 => memory.timerCounter,
+        0xFF06 => memory.timerModulo,
+        0xFF07 => { //TAC
+            let mut tacReg = 
+                match memory.timerMode {
+                    TimerMode::Mode0 => 0,
+                    TimerMode::Mode1 => 1,
+                    TimerMode::Mode2 => 2,
+                    TimerMode::Mode3 => 3
+                };
+
+            if memory.timerEnabled {
+                tacReg |= 1 << 2;
+            }
+            
+            tacReg
+
+        },
+
+        0xFF0F => memory.requestedInterrupts,
+        0xFF40 => { //LCD Control
+            let mut control = 0u8;
+
+            //Bit 7 - LCD Enabled
+            control = if lcd.isEnabled { control | (1 << 7)} else {control};
+            //TODO: Tile stuff goes here
+
+            //Bit 4 - Background Tile Set Select
+            control |= lcd.backgroundTileSet << 4;
+            //Bit 3 - Background Tile Data Select
+            control |= lcd.backgroundTileMap << 3;
+            //Bit 2 - Sprite size
+            control |= match lcd.spriteHeight {
+                SpriteHeight::Short => 0, //bit unset in 8x8 mode
+                SpriteHeight::Tall => (1 << 2), //bit set in 8x16 mode
+            };
+
+            //Bit 0 - Background enabled
+            control |= if lcd.isBackgroundEnabled {1} else {0};
+
+            control
+        },
+
 
         0xFF41 => { //LCD Status
-            let mut status = 0;
+            //TODO: move orring of lcd.mode bits into gb_lcd.rs
+            let mut status = lcd.lcdc;
             status |= lcd.mode as u8; //put in lcd mode
 
             status
@@ -205,6 +252,7 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0xFF42 => lcd.scy,
         0xFF43 => lcd.scx,
         0xFF44 => lcd.currScanLine,
+        0xFF45 => lcd.lyc,
         0xFF47 => u8ForColorPalette(&lcd.palette),
         0xFF48 => u8ForColorPalette(&lcd.spritePalette0),
         0xFF49 => u8ForColorPalette(&lcd.spritePalette1),
@@ -240,6 +288,26 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
                 }
 
         },
+        0xFF04 => memory.divider = 0, //reset divider
+        0xFF05 => memory.timerCounter = memory.timerModulo,
+        0xFF06 => memory.timerModulo = byte,
+        0xFF07 =>  { //TAC
+            memory.timerMode = match byte & 3 {
+                0 => TimerMode::Mode0,
+                1 => TimerMode::Mode1,
+                2 => TimerMode::Mode2,
+                3 => TimerMode::Mode3,
+                _ => panic!("This is impossible...")
+            };
+
+            memory.timerEnabled = 
+                if byte & (1 << 2) != 0 { 
+                    true
+                }
+                else {
+                    false
+                };
+        },
         0xFF0F => memory.requestedInterrupts = byte,
         0xFF40 => { //LCD Control
 
@@ -257,9 +325,15 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
             lcd.isBackgroundEnabled = (byte & 1) != 0;
 
         },
+        0xFF41 => {//Configure LCDC interrupt 
+            //last 3 bits are read-only
+            lcd.lcdc = byte & !7
+
+        },
         0xFF42 => lcd.scy = byte,
         0xFF43 => lcd.scx = byte,
         0xFF44 => lcd.currScanLine = 0, //resets the current line if written to
+        0xFF45 => lcd.lyc = byte,
         0xFF47 => updateColorPaletteFromU8(&mut lcd.palette, byte),
         0xFF48 => updateColorPaletteFromU8(&mut lcd.spritePalette0, byte),
         0xFF49 => updateColorPaletteFromU8(&mut lcd.spritePalette1, byte),

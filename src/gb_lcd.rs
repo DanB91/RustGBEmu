@@ -1,6 +1,7 @@
 extern crate sdl2;
 
 use std::mem::swap; 
+use self::LCDMode::*;
 
 //Holds the state of the  screen and controller
 pub struct LCDState {
@@ -12,7 +13,7 @@ pub struct LCDState {
     pub oam: [u8;0xA0], //sprite memory
     pub mode: LCDMode, 
     pub modeClock: u32,
-    pub currScanLine: u8,
+    pub currScanLine: u8, //ly
     pub backgroundTileMap: u8, //which background tile map to use (0 or 1)
     pub backgroundTileSet: u8, //which background tile set to use (0 or 1)
     pub isBackgroundEnabled: bool,
@@ -21,6 +22,9 @@ pub struct LCDState {
     pub scx: u8, //scroll x
     pub scy: u8, //scroll y
     pub spriteHeight: SpriteHeight, //can be 8 or 16
+
+    pub lcdc: u8, //tells when to engage the lcdc interrupt
+    pub lyc: u8,
     
     pub screen: LCDScreen,
     pub screenBackBuffer: LCDScreen,
@@ -80,6 +84,10 @@ impl LCDState {
             spritePalette1: [WHITE, WHITE, WHITE, WHITE], 
             isEnabled: false,
 
+
+            lcdc: 0,
+            lyc: 0,
+            
             screen: BLANK_SCREEN,
             screenBackBuffer: BLANK_SCREEN
         }
@@ -186,7 +194,7 @@ fn getBackgroundTileReferenceStartAddress(lcd: &mut LCDState) -> usize {
     /* Tile Map:
      *
      * Each "row" is 32 bytes long where each byte is a tile reference
-     * Each byte represents a 8x8 pixel tils, so each row and column are 256 pixels long
+     * Each byte represents a 8x8 pixel tile, so each row and column are 256 pixels long
      * Each byte represents a 16 byte tile where every 2 bytes represents an 8 pixel row
      *
      *------------------------------------------------------
@@ -294,10 +302,42 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
     
 }
 
+fn changeScanLine(newScanLine: u8, lcd: &mut LCDState, requestedInterrupts: &mut u8) {
+    lcd.currScanLine = newScanLine;
+
+    //NOTE: currScanLine is ly
+    //if lyc == ly...
+    if lcd.currScanLine == lcd.lyc {
+        lcd.lcdc |= 1 << 3; //turn on lyc == ly status bit
+
+        //request lcdc interrupt if enabled
+        if (lcd.lcdc & 1 << 6) != 0 {
+
+            *requestedInterrupts |= 1 << 1;
+        }
+    }
+    else {
+        lcd.lcdc &= !(1 << 3); //turn off lyc == ly status bit
+    }
+
+}
+
+fn changeToNewLCDMode(newMode: LCDMode, lcd: &mut LCDState, requestedInterrupts: &mut u8) {
+    lcd.mode = newMode;
+
+    *requestedInterrupts |= match newMode {
+        ScanOAM if lcd.lcdc & (1 << 5) != 0  => 1 << 1,
+        HBlank if lcd.lcdc & (1 << 4) != 0  => 1 << 1,
+        VBlank if lcd.lcdc & (1 << 3) != 0 => 1 << 1,
+            
+        _ => *requestedInterrupts
+    };
+
+}
+
 
 
 pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLastInstruction: u32) {
-    use self::LCDMode::*;
 
     if lcd.isEnabled {
         
@@ -308,11 +348,11 @@ pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLa
 
             HBlank if lcd.modeClock >= 204 => {
                 lcd.modeClock = 0;
-                lcd.currScanLine += 1;
+                changeScanLine(lcd.currScanLine + 1, lcd, requestedInterrupts);
 
                 //at the last line...
                 if lcd.currScanLine == 143 {
-                    lcd.mode = VBlank; //engage VBlank
+                    changeToNewLCDMode(VBlank, lcd, requestedInterrupts); //engage VBlank
                     swap(&mut lcd.screen, &mut lcd.screenBackBuffer); //commit fully drawn screen
                     *requestedInterrupts |= 1; //request VBlank interrupt
                 }
@@ -322,12 +362,12 @@ pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLa
             },
 
             VBlank if lcd.modeClock >= 456 => {
-                lcd.currScanLine += 1;
                 lcd.modeClock = 0;
+                changeScanLine(lcd.currScanLine + 1, lcd, requestedInterrupts);
 
                 if lcd.currScanLine == 153 {
-                    lcd.mode = ScanOAM;
-                    lcd.currScanLine = 0;
+                    changeToNewLCDMode(ScanOAM, lcd, requestedInterrupts); 
+                    changeScanLine(0, lcd, requestedInterrupts);
 
                 }
             },
@@ -335,8 +375,7 @@ pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLa
             ScanOAM if lcd.modeClock >= 80 => {
                 //TODO: Draw OAM to internal screen buffer
 
-
-                lcd.mode = ScanVRAMAndOAM;
+                changeToNewLCDMode(ScanVRAMAndOAM, lcd, requestedInterrupts); 
                 lcd.modeClock = 0;
             },
 
@@ -461,9 +500,7 @@ pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLa
 
                 }
 
-
-
-                lcd.mode = HBlank;
+                changeToNewLCDMode(HBlank, lcd, requestedInterrupts); 
                 lcd.modeClock = 0;
 
             },

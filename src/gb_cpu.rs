@@ -58,11 +58,14 @@ pub enum Flag {
 static ISRs: [u16;5] = [0x40, 0x48, 0x50, 0x58, 0x60]; 
 
 pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
+    let mut isHandlingInterrupt = false;
 
     if cpu.enableInterrupts {
         let interruptsToHandle = mem.enabledInterrupts & mem.requestedInterrupts;
 
         if interruptsToHandle != 0 {
+            isHandlingInterrupt = true;
+
             pushOnToStack(mem, cpu.PC, &mut cpu.SP); //Save PC
 
             for (i, ISR) in ISRs.iter().enumerate() {
@@ -75,17 +78,16 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
                     break;
                 }
             }
-
         }
-
-
     }
 
     let instructionToExecute = readByteFromMemory(mem, cpu.PC);
 
     let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
     cpu.PC = newPC;
-    cpu.instructionCycles = cyclesTaken;
+
+    //Handling interrupts takes 20 cycles to just set up handling
+    cpu.instructionCycles = if isHandlingInterrupt {cyclesTaken.wrapping_add(20)} else {cyclesTaken};
     cpu.totalCycles.wrapping_add(cyclesTaken);
 
 }

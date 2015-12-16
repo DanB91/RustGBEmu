@@ -66,7 +66,7 @@ pub fn drawDebugInfo(dbg: &DebugInfo, gb: &GameBoyState, renderer: &mut Renderer
         instructionToPrint =  word(0xCBu8, readByteFromMemory(&gb.mem, gb.cpu.PC.wrapping_add(1)))
     }
     //print debug details
-    toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
+    toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",  
                       format!("Opcode:{:X}", instructionToPrint),
                       format!("Total Cycles: {}, Cycles just executed: {}", gb.cpu.totalCycles, gb.cpu.instructionCycles),
                       format!("Mhz {:.*}", 2, dbg.mhz),
@@ -78,7 +78,8 @@ pub fn drawDebugInfo(dbg: &DebugInfo, gb: &GameBoyState, renderer: &mut Renderer
                       format!("SCX: {}, SCY: {}", gb.mem.lcd.scx, gb.mem.lcd.scy),
                       format!("FPS: {}, Paused: {}", dbg.fps, dbg.isPaused),
                       format!("Mouse X: {}, Mouse Y: {}", dbg.mouseX, dbg.mouseY),
-                      format!("Color Mouse is on: {}", dbg.colorMouseIsOn));
+                      format!("Color Mouse is on: {}", dbg.colorMouseIsOn),
+                      format!("Divider: {:X}\tTimer: {:X}\tTimer On: {}", gb.mem.divider, gb.mem.timerCounter, gb.mem.timerEnabled)); 
 
 
 
