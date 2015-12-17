@@ -289,9 +289,9 @@ fn main() {
                 //if timer is enabled...
                 //TODO: Timer may need to be more accurate in the case
                 //      when the timer is slowed down or sped up.  Cycles may need to be reset.
-                if gb.mem.timerEnabled {
-                    //decide how fast to count
+                if gb.mem.isTimerEnabled {
                     cyclesPerTimerIncrement += gb.cpu.instructionCycles;
+
 
                     if cyclesPerTimerIncrement >= (gb.mem.timerMode as u32) {
                         gb.mem.timerCounter = gb.mem.timerCounter.wrapping_add(1);

@@ -13,10 +13,10 @@ pub const CYCLES_PER_DIVIDER_INCREMENT: u32 = 256;
 //tells how fast to increment the timer
 #[derive(Copy, Clone)]
 pub enum TimerMode  {
-    Mode0 =  CLOCK_SPEED_HZ as isize / 1024,
-    Mode1 =  CLOCK_SPEED_HZ as isize / 16,
-    Mode2 =  CLOCK_SPEED_HZ as isize / 64,
-    Mode3 =  CLOCK_SPEED_HZ as isize / 256
+    Mode0 =  CLOCK_SPEED_HZ as isize / 4096,
+    Mode1 =  CLOCK_SPEED_HZ as isize / 262144,
+    Mode2 =  CLOCK_SPEED_HZ as isize / 65536,
+    Mode3 =  CLOCK_SPEED_HZ as isize / 16384
 }
 
 //NOTE(DanB):anything accessed by MMU goes in here including LCD related function
@@ -37,7 +37,7 @@ pub struct MemoryMapState {
     pub timerCounter: u8, //TIMA
     pub timerModulo: u8, //TMA
     pub timerMode: TimerMode, 
-    pub timerEnabled: bool, 
+    pub isTimerEnabled: bool, 
 
 }
 
@@ -60,7 +60,7 @@ impl MemoryMapState {
             timerCounter: 0,
             timerModulo: 0,
             timerMode: TimerMode::Mode0, 
-            timerEnabled: false
+            isTimerEnabled: false
         }
     }
 
@@ -208,7 +208,7 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
                     TimerMode::Mode3 => 3
                 };
 
-            if memory.timerEnabled {
+            if memory.isTimerEnabled {
                 tacReg |= 1 << 2;
             }
             
@@ -233,6 +233,9 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
                 SpriteHeight::Short => 0, //bit unset in 8x8 mode
                 SpriteHeight::Tall => (1 << 2), //bit set in 8x16 mode
             };
+
+            //Bit 1 - OAM Enable
+            control |= if lcd.isOAMEnabled {1 << 1} else {0};
 
             //Bit 0 - Background enabled
             control |= if lcd.isBackgroundEnabled {1} else {0};
@@ -302,7 +305,7 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
                 _ => panic!("This is impossible...")
             };
 
-            memory.timerEnabled = 
+            memory.isTimerEnabled = 
                 if byte & (1 << 2) != 0 { 
                     true
                 }
@@ -323,6 +326,8 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
             //Bit 2 - Sprite size
             lcd.spriteHeight = if testBit!(byte, 2) {SpriteHeight::Tall} 
                 else {SpriteHeight::Short};
+            //Bit 1 - OAM enabled
+            lcd.isOAMEnabled = testBit!(byte, 1);
             //Bit 0 - Background enabled
             lcd.isBackgroundEnabled = (byte & 1) != 0;
 

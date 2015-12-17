@@ -79,7 +79,7 @@ pub fn drawDebugInfo(dbg: &DebugInfo, gb: &GameBoyState, renderer: &mut Renderer
                       format!("FPS: {}, Paused: {}", dbg.fps, dbg.isPaused),
                       format!("Mouse X: {}, Mouse Y: {}", dbg.mouseX, dbg.mouseY),
                       format!("Color Mouse is on: {}", dbg.colorMouseIsOn),
-                      format!("Divider: {:X}\tTimer: {:X}\tTimer On: {}", gb.mem.divider, gb.mem.timerCounter, gb.mem.timerEnabled)); 
+                      format!("DIV: {:X}, TIMA: {:X}, TMA: {:X}, Timer On: {}", gb.mem.divider, gb.mem.timerCounter, gb.mem.timerModulo, gb.mem.isTimerEnabled)); 
 
 
 
@@ -149,8 +149,22 @@ fn lcdDebugInfo(lcd: &LCDState) -> String {
            tileNum += 1;
 
        }
+       
 
    }
+
+
+   let mut oamStr = String::new() + "OAM Section:";
+   for (byteNum, byte) in lcd.oam.iter().enumerate() {
+       if byteNum % 16 == 0 {
+           oamStr = oamStr + "\n";
+       }
+       oamStr = format!("{}{:X},", oamStr, byte)
+   }
+
+   toPrint = format!("{}\n\n{}", toPrint, oamStr);
+
+
 
    toPrint
 }

@@ -18,6 +18,7 @@ pub struct LCDState {
     pub backgroundTileSet: u8, //which background tile set to use (0 or 1)
     pub isBackgroundEnabled: bool,
     pub isEnabled: bool,
+    pub isOAMEnabled: bool,
 
     pub scx: u8, //scroll x
     pub scy: u8, //scroll y
@@ -25,7 +26,7 @@ pub struct LCDState {
 
     pub lcdc: u8, //tells when to engage the lcdc interrupt
     pub lyc: u8,
-    
+
     pub screen: LCDScreen,
     pub screenBackBuffer: LCDScreen,
 }
@@ -67,7 +68,7 @@ impl LCDState {
 
     pub fn new() -> LCDState {
         LCDState {
-            
+
             mode: LCDMode::ScanOAM,
             modeClock: 0,
             scx: 0, //scroll x
@@ -83,11 +84,12 @@ impl LCDState {
             spritePalette0: [WHITE, WHITE, WHITE, WHITE], 
             spritePalette1: [WHITE, WHITE, WHITE, WHITE], 
             isEnabled: false,
+            isOAMEnabled: false,
 
 
             lcdc: 0,
             lyc: 0,
-            
+
             screen: BLANK_SCREEN,
             screenBackBuffer: BLANK_SCREEN
         }
@@ -105,7 +107,7 @@ struct Sprite {
     isYFlipped: bool,
     isXFlipped: bool,
     selectedSpritePalette: SpritePalette,
-    
+
     oamIndex: usize //the index in LCDState.oam that the sprite is stored in.
         //used for priority sorting
 }
@@ -187,8 +189,8 @@ fn getBackgroundTileReferenceStartAddress(lcd: &mut LCDState) -> usize {
 
     let mut tileRefAddr = match lcd.backgroundTileMap {
         0 => 0x1800usize,  //it is 0x1800 instead of 0x9800 because this is relative to start of vram
-        1 => 0x1C00usize,
-        _ => panic!("Uh oh, the tile map should only be 0 or 1")
+          1 => 0x1C00usize,
+          _ => panic!("Uh oh, the tile map should only be 0 or 1")
     };
 
     /* Tile Map:
@@ -220,8 +222,8 @@ fn getBackgroundTileAddressFromReferenceAddress(backgroundTileReferenceAddress: 
     //find the tile based on the tile reference
     let mut tileAddr = match lcd.backgroundTileSet {
         0 => (0x1000i16 + ((tileRef as i8 as i16) * BYTES_PER_TILE as i16)) as usize, //signed addition
-        1 => (tileRef as usize) * BYTES_PER_TILE, 
-        _ => panic!("Uh oh, the tile set should only be 0 or 1")
+          1 => (tileRef as usize) * BYTES_PER_TILE, 
+          _ => panic!("Uh oh, the tile set should only be 0 or 1")
     };
 
 
@@ -259,11 +261,11 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
     debug_assert!(currPixelYPostion >= spriteYStart);
 
     let currPixelYPostionInTile = currPixelYPostion - spriteYStart; 
-    
+
     let xMask = 0x80u8 >> (currPixelXPostion - spriteXStart & 7);
 
     match lcd.spriteHeight {
-       Short => {
+        Short => {
             if currPixelYPostionInTile < Short as usize {
                 //sprites start at start of vram
                 let mut tileAddr = sprite.tileReference as usize * BYTES_PER_TILE; 
@@ -274,7 +276,7 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
 
                 let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
                 let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
-                
+
                 ColorNumber::fromU8((highBit * 2) + lowBit)
             }
             else {
@@ -282,24 +284,24 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
             }
         }
 
-       Tall => {
-           let tileRef = if currPixelYPostionInTile < 8 {sprite.tileReference & 0xFE} else {sprite.tileReference | 1};
+        Tall => {
+            let tileRef = if currPixelYPostionInTile < 8 {sprite.tileReference & 0xFE} else {sprite.tileReference | 1};
 
-           //sprites start at start of vram
-           let mut tileAddr = tileRef as usize * BYTES_PER_TILE; 
+            //sprites start at start of vram
+            let mut tileAddr = tileRef as usize * BYTES_PER_TILE; 
 
-           tileAddr += (((currPixelYPostion - spriteYStart) & 7) as usize) * BYTES_PER_TILE_ROW;
+            tileAddr += (((currPixelYPostion - spriteYStart) & 7) as usize) * BYTES_PER_TILE_ROW;
 
-           let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
-           let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
-           
-           ColorNumber::fromU8((highBit * 2) + lowBit)
+            let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
+            let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
 
-       }
+            ColorNumber::fromU8((highBit * 2) + lowBit)
+
+        }
     }
 
 
-    
+
 }
 
 fn changeScanLine(newScanLine: u8, lcd: &mut LCDState, requestedInterrupts: &mut u8) {
@@ -329,7 +331,7 @@ fn changeToNewLCDMode(newMode: LCDMode, lcd: &mut LCDState, requestedInterrupts:
         ScanOAM if lcd.lcdc & (1 << 5) != 0  => 1 << 1,
         HBlank if lcd.lcdc & (1 << 4) != 0  => 1 << 1,
         VBlank if lcd.lcdc & (1 << 3) != 0 => 1 << 1,
-            
+
         _ => *requestedInterrupts
     };
 
@@ -340,10 +342,10 @@ fn changeToNewLCDMode(newMode: LCDMode, lcd: &mut LCDState, requestedInterrupts:
 pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLastInstruction: u32) {
 
     if lcd.isEnabled {
-        
+
         //get instruction cycles of last instruction exectued
         lcd.modeClock += cyclesTakenOfLastInstruction; 
-        
+
         match lcd.mode {
 
             HBlank if lcd.modeClock >= 204 => {
@@ -389,46 +391,50 @@ pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLa
 
 
                 let mut spritesSortedByPriority: Vec<Sprite> = vec![];
+                let mut numSpritesToDraw = 0;
 
-                //get sprites to draw for this scan line 
-                let mut i = 0;
-                while i < lcd.oam.len() {
-                    //sprite location is lower right hand corner
-                    //so x and y coords are offset by 8 and 16 respectively
-                    
-                    let spriteY = lcd.oam[i];
-                    let spriteX = lcd.oam[i+1];
+                if lcd.isOAMEnabled {
+                    //get sprites to draw for this scan line 
+                    let mut i = 0;
+                    while i < lcd.oam.len() {
+                        //sprite location is lower right hand corner
+                        //so x and y coords are offset by 8 and 16 respectively
 
-                    //x coordinates explicitly ignored since even though sprites outside of the
-                    //screen are not drawn, they do affect priority
-                    if yInPixels < spriteY &&
-                        yInPixels >= spriteY.wrapping_sub(16) {
+                        let spriteY = lcd.oam[i];
+                        let spriteX = lcd.oam[i+1];
 
-                        spritesSortedByPriority.push(
-                            Sprite::new(spriteY, spriteX, lcd.oam[i+2], lcd.oam[i+3], i)
-                            );
+                        //x coordinates explicitly ignored since even though sprites outside of the
+                        //screen are not drawn, they do affect priority
+                        if yInPixels < spriteY &&
+                            yInPixels >= spriteY.wrapping_sub(16) {
+
+                                spritesSortedByPriority.push(
+                                    Sprite::new(spriteY, spriteX, lcd.oam[i+2], lcd.oam[i+3], i)
+                                    );
+                            }
+
+                        i += 4;
+
                     }
 
-                    i += 4;
+                    //sort sprites by priority (last element is lowest priority)
+                    spritesSortedByPriority.sort_by(|left, right| {
+                        if left.x != right.x {
+                            left.x.cmp(&right.x)
+                        }
+                        else {
+                            left.oamIndex.cmp(&right.oamIndex)
+                        }
+                    });
 
-                }
-
-                //sort sprites by priority (last element is lowest priority)
-                spritesSortedByPriority.sort_by(|left, right| {
-                    if left.x != right.x {
-                        left.x.cmp(&right.x)
+                    numSpritesToDraw = if spritesSortedByPriority.len() < MAX_SPRITES_PER_SCANLINE {
+                        spritesSortedByPriority.len()
                     }
                     else {
-                        left.oamIndex.cmp(&right.oamIndex)
-                    }
-                });
+                        MAX_SPRITES_PER_SCANLINE
+                    };
 
-                let numSpritesToDraw = if spritesSortedByPriority.len() < MAX_SPRITES_PER_SCANLINE {
-                    spritesSortedByPriority.len()
                 }
-                else {
-                    MAX_SPRITES_PER_SCANLINE
-                };
 
                 //can only draw at most 10 sprites per scanline
                 let spritesToDraw = &spritesSortedByPriority[0..numSpritesToDraw];

@@ -19,7 +19,7 @@ pub struct CPUState {
     pub F: u8,
     pub H: u8,
     pub L: u8,
-    pub totalCycles: u32, //total cycles since game has been loaded
+    pub totalCycles: u64, //total cycles since game has been loaded
     pub instructionCycles: u32, //number of cycles in a given instruction
 
     pub enableInterrupts: bool
@@ -88,7 +88,7 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
 
     //Handling interrupts takes 20 cycles to just set up handling
     cpu.instructionCycles = if isHandlingInterrupt {cyclesTaken.wrapping_add(20)} else {cyclesTaken};
-    cpu.totalCycles.wrapping_add(cyclesTaken);
+    cpu.totalCycles = cpu.totalCycles.wrapping_add(cyclesTaken as u64);
 
 }
 
