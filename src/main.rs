@@ -43,26 +43,65 @@ const SECONDS_PER_FRAME: f32 = 1f32/60f32;
 const CYCLES_PER_SLEEP: u32 = 60000;
 
 
-
-
 struct ProgramState {
     shouldDisplayDebug: bool,
     isPaused: bool,
     isRunning: bool,
 
+    shouldSkipBootScreen: bool,
+    romFileName: String,
+
     gb: Box<GameBoyState>,
 }
 
 impl ProgramState {
-    fn new() -> ProgramState {
+    fn new(romFileName: String, shouldSkipBootScreen: bool) -> ProgramState {
         ProgramState {
             shouldDisplayDebug: false,
             isPaused: false,
             isRunning: true,
 
+            shouldSkipBootScreen: shouldSkipBootScreen,
+            romFileName: romFileName,
+
             gb: Box::new(GameBoyState::new())
         }
     }
+}
+
+fn printUsageAndExit() -> ! {
+    println!("{}", USAGE);
+    std::process::exit(1)
+}
+
+//TODO: learn life time
+fn parseArgs() -> ProgramState {
+    let args = env::args();
+
+    let mut romFileName = None;
+    let mut shouldSkipBootScreen = false;
+
+    if args.len() != 0 {
+
+        for arg in args {
+            match &*arg {
+                "-s" => shouldSkipBootScreen = true,
+                _ => romFileName = Some(arg.to_string())
+            }
+        }
+
+        let ret = match romFileName {
+            Some(rfn) => ProgramState::new(rfn, shouldSkipBootScreen),
+            None => printUsageAndExit()
+        };
+
+        ret
+
+    }
+    else {
+        printUsageAndExit()
+    }
+
 }
 
 
@@ -70,23 +109,14 @@ impl ProgramState {
 fn main() {
 
 
-    //parse cmd args
-    let fileName = match getROMFileName() {
-        Ok(fileName) => fileName,
-        Err(err) => {
-            println!("{}", err);
-            return
-        }
-    };
+    let mut prg = parseArgs();
+    let mut gb = &mut *prg.gb;
 
     //load ROM
-    let romData = match openROM(&fileName[..]) {
+    let romData = match openROM(&prg.romFileName) {
         Ok(data) => data,
         Err(err) => panic!("{}", err)
     };
-
-    let mut prg = ProgramState::new();
-    let mut gb = &mut *prg.gb;
 
 
     gb.mem.romData = romData;
@@ -273,7 +303,8 @@ fn main() {
         //------------------------step emulator-------------------------------
         if !prg.isPaused {
             //run several thousand game boy cycles or so 
-            while batchCycles < CYCLES_PER_SLEEP{
+            while batchCycles < CYCLES_PER_SLEEP || 
+                (prg.shouldSkipBootScreen && gb.mem.inBios) {
                 stepCPU(&mut gb.cpu, &mut gb.mem);
 
                 stepLCD(&mut gb.mem.lcd, &mut gb.mem.requestedInterrupts, gb.cpu.instructionCycles);
@@ -371,21 +402,7 @@ fn main() {
 }
 
 
-fn getROMFileName() -> Result<String, &'static str> {
 
-    let mut i = 0;
-    let mut retStr = Err(USAGE);
-    for arg in env::args() {
-        retStr = match i {
-            1 => Ok(arg),
-            _ => Err(USAGE), 
-        };
-        i += 1;
-
-    }
-
-    retStr
-}
 
 //TODO: finish disassembler
 fn disassemble(cpu: &CPUState, mem: &MemoryMapState) -> String {

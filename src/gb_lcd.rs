@@ -39,6 +39,7 @@ pub enum LCDMode {
     ScanVRAMAndOAM = 3
 }
 
+#[derive(PartialEq, Copy, Clone)]
 pub enum SpriteHeight {
     Short = 8,
     Tall = 16
@@ -222,8 +223,8 @@ fn getBackgroundTileAddressFromReferenceAddress(backgroundTileReferenceAddress: 
     //find the tile based on the tile reference
     let mut tileAddr = match lcd.backgroundTileSet {
         0 => (0x1000i16 + ((tileRef as i8 as i16) * BYTES_PER_TILE as i16)) as usize, //signed addition
-          1 => (tileRef as usize) * BYTES_PER_TILE, 
-          _ => panic!("Uh oh, the tile set should only be 0 or 1")
+        1 => (tileRef as usize) * BYTES_PER_TILE, 
+        _ => panic!("Uh oh, the tile set should only be 0 or 1")
     };
 
 
