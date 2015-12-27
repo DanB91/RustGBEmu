@@ -51,8 +51,12 @@ pub const LIGHT_GRAY: PaletteColor = sdl2::pixels::Color::RGBA(170,170,170,255);
 pub const DARK_GRAY: PaletteColor = sdl2::pixels::Color::RGBA(85,85,85,255);
 pub const BLACK: PaletteColor = sdl2::pixels::Color::RGBA(0,0,0,255);
 
-pub type LCDScreen = [[PaletteColor;160];144]; 
-pub const BLANK_SCREEN: LCDScreen = [[WHITE;160];144];
+pub const SCREEN_WIDTH: usize = 160;
+pub const SCREEN_HEIGHT: usize = 144;
+
+
+pub type LCDScreen = [[PaletteColor;SCREEN_WIDTH];SCREEN_HEIGHT]; 
+pub const BLANK_SCREEN: LCDScreen = [[WHITE;SCREEN_WIDTH];SCREEN_HEIGHT];
 
 const TILE_WIDTH: usize = 8;
 const TILE_HEIGHT: usize = 8;
@@ -441,7 +445,7 @@ pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLa
                 let spritesToDraw = &spritesSortedByPriority[0..numSpritesToDraw];
 
 
-                for posInScanLine in 0..160usize {
+                for posInScanLine in 0..SCREEN_WIDTH {
 
                     let mut spriteColorNum = Color0;
                     let mut spriteToDraw = None;

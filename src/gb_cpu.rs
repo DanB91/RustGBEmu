@@ -83,7 +83,14 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
 
     let instructionToExecute = readByteFromMemory(mem, cpu.PC);
 
+    if instructionToExecute == 0xC5 && !mem.inBios {
+        println!("PC: {:X} SP: {:X} BC: {:X}", cpu.PC, cpu.SP, word(cpu.B, cpu.C));
+    }
+
     let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
+    if instructionToExecute == 0xF1 && !mem.inBios {
+        println!("PC: {:X} SP: {:X} AF: {:X}", cpu.PC, cpu.SP, word(cpu.A, cpu.F));
+    }
     cpu.PC = newPC;
 
     //Handling interrupts takes 20 cycles to just set up handling

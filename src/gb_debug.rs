@@ -129,8 +129,8 @@ fn lcdDebugInfo(lcd: &LCDState) -> String {
 
            let asciiPixel = match colorNum {
                0 => ".", //white
-               1 => "7", //light gray
-               2 => "8", //dark gray
+               1 => "!", //light gray
+               2 => "*", //dark gray
                3 => "#", //black
                _ => panic!("This is mathematically impossible")
            };
@@ -141,7 +141,7 @@ fn lcdDebugInfo(lcd: &LCDState) -> String {
        }
 
 
-       tile = format!("{}{}\t{:X}{:X}\n", tile, line, bytePair[1], bytePair[0]);
+       tile = format!("{}{}\t{:02X}{:02X}\n", tile, line, bytePair[1], bytePair[0]);
 
        if (lineIndex % 8) == 7 {
            toPrint = format!("{}\n{:X}:\n{}", toPrint, tileNum, tile);

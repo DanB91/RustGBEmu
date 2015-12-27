@@ -32,11 +32,11 @@ use sdl2::*;
 
 static USAGE: &'static str= "Usage: gbemu path_to_rom";
 
-const SCREEN_WIDTH: u32 = 160 * GAMEBOY_SCALE;
-const SCREEN_HEIGHT: u32 = 144 * GAMEBOY_SCALE;
+const WINDOW_WIDTH: u32 = SCREEN_WIDTH as u32 * GAMEBOY_SCALE;
+const WINDOW_HEIGHT: u32 = SCREEN_HEIGHT as u32 * GAMEBOY_SCALE;
 
 //place to put debug area
-const DEBUG_POS_Y: i32 = SCREEN_HEIGHT as i32;
+const DEBUG_POS_Y: i32 = WINDOW_HEIGHT as i32;
 
 
 const SECONDS_PER_FRAME: f32 = 1f32/60f32;
@@ -81,7 +81,7 @@ fn parseArgs() -> ProgramState {
     let mut romFileName = None;
     let mut shouldSkipBootScreen = false;
 
-    if args.len() != 0 {
+    if args.len() > 1 {
 
         for arg in args {
             match &*arg {
@@ -131,15 +131,15 @@ fn main() {
     let timer = sdlContext.timer().unwrap();
     let mut eventPump = sdlContext.event_pump().unwrap();
 
-    let mut mainWindowHeight = SCREEN_HEIGHT;
-    let mainWindowWidth = SCREEN_WIDTH;
+    let mut mainWindowHeight = WINDOW_HEIGHT;
+    let mainWindowWidth = WINDOW_WIDTH;
     let mainWindow = videoSubsystem.window("GB Emu", mainWindowWidth, mainWindowHeight).position_centered().build().unwrap();
     let mainWindowID = mainWindow.id();
     let mut renderer = mainWindow.renderer().build().unwrap();
 
 
     //init debug screen
-    let mut dbg = initDebug(0, SCREEN_HEIGHT as i32, SCREEN_WIDTH, SCREEN_HEIGHT / 2);
+    let mut dbg = initDebug(0, WINDOW_HEIGHT as i32, WINDOW_WIDTH, WINDOW_HEIGHT / 2);
 
     //main loop
     while prg.isRunning {
@@ -198,10 +198,10 @@ fn main() {
                                         prg.shouldDisplayDebug = !prg.shouldDisplayDebug;
 
                                         mainWindowHeight = if prg.shouldDisplayDebug {
-                                             SCREEN_HEIGHT + dbg.drawHeight
+                                             WINDOW_HEIGHT + dbg.drawHeight
                                         }
                                         else {
-                                            SCREEN_HEIGHT
+                                            WINDOW_HEIGHT
                                         };
 
                                         renderer.window_mut().unwrap().set_size(mainWindowWidth, mainWindowHeight);
