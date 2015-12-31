@@ -163,7 +163,7 @@ fn main() {
                     }
                 },
 
-            
+
                 Event::KeyUp{keycode: keyOpt, ..} => {
                     match keyOpt {
 
@@ -174,7 +174,7 @@ fn main() {
                                 Keycode::Down => gb.mem.joypad.down = ButtonState::Up,
                                 Keycode::Left => gb.mem.joypad.left = ButtonState::Up,
                                 Keycode::Right => gb.mem.joypad.right = ButtonState::Up,
-                                
+
                                 Keycode::X => gb.mem.joypad.a = ButtonState::Up,
                                 Keycode::Z => gb.mem.joypad.b = ButtonState::Up,
                                 Keycode::Return => gb.mem.joypad.start = ButtonState::Up,
@@ -198,7 +198,7 @@ fn main() {
                                         prg.shouldDisplayDebug = !prg.shouldDisplayDebug;
 
                                         mainWindowHeight = if prg.shouldDisplayDebug {
-                                             WINDOW_HEIGHT + dbg.drawHeight
+                                            WINDOW_HEIGHT + dbg.drawHeight
                                         }
                                         else {
                                             WINDOW_HEIGHT
@@ -215,13 +215,13 @@ fn main() {
 
                                 Keycode::U => {
                                     if !isRepeat {
-                                        match dumpGameBoyState(gb) {
-                                           Ok(_) => { 
-                                               println!("Wrote debug file");
-                                           },
-                                           Err(err) => {
-                                               println!("{}", err);
-                                           }
+                                        match dumpGameBoyState(gb, "dump.txt") {
+                                            Ok(_) => { 
+                                                println!("Wrote debug file");
+                                            },
+                                            Err(err) => {
+                                                println!("{}", err);
+                                            }
                                         }
                                     }
                                 }
@@ -289,7 +289,7 @@ fn main() {
 
                             }
 
-                    };
+                        };
 
                 },
 
@@ -305,36 +305,37 @@ fn main() {
             //run several thousand game boy cycles or so 
             while batchCycles < CYCLES_PER_SLEEP || 
                 (prg.shouldSkipBootScreen && gb.mem.inBios) {
-                stepCPU(&mut gb.cpu, &mut gb.mem);
 
-                stepLCD(&mut gb.mem.lcd, &mut gb.mem.requestedInterrupts, gb.cpu.instructionCycles);
-                batchCycles += gb.cpu.instructionCycles;
+                    stepCPU(&mut gb.cpu, &mut gb.mem);
 
-                cyclesPerDividerIncrement += gb.cpu.instructionCycles;
+                    stepLCD(&mut gb.mem.lcd, &mut gb.mem.requestedInterrupts, gb.cpu.instructionCycles);
+                    batchCycles += gb.cpu.instructionCycles;
 
-                if cyclesPerDividerIncrement >= CYCLES_PER_DIVIDER_INCREMENT {
-                    gb.mem.divider = gb.mem.divider.wrapping_add(1);
-                    cyclesPerDividerIncrement -= CYCLES_PER_DIVIDER_INCREMENT;
-                }
-                
-                //if timer is enabled...
-                //TODO: Timer may need to be more accurate in the case
-                //      when the timer is slowed down or sped up.  Cycles may need to be reset.
-                if gb.mem.isTimerEnabled {
-                    cyclesPerTimerIncrement += gb.cpu.instructionCycles;
+                    cyclesPerDividerIncrement += gb.cpu.instructionCycles;
+
+                    if cyclesPerDividerIncrement >= CYCLES_PER_DIVIDER_INCREMENT {
+                        gb.mem.divider = gb.mem.divider.wrapping_add(1);
+                        cyclesPerDividerIncrement -= CYCLES_PER_DIVIDER_INCREMENT;
+                    }
+
+                    //if timer is enabled...
+                    //TODO: Timer may need to be more accurate in the case
+                    //      when the timer is slowed down or sped up.  Cycles may need to be reset.
+                    if gb.mem.isTimerEnabled {
+                        cyclesPerTimerIncrement += gb.cpu.instructionCycles;
 
 
-                    if cyclesPerTimerIncrement >= (gb.mem.timerMode as u32) {
-                        gb.mem.timerCounter = gb.mem.timerCounter.wrapping_add(1);
+                        if cyclesPerTimerIncrement >= (gb.mem.timerMode as u32) {
+                            gb.mem.timerCounter = gb.mem.timerCounter.wrapping_add(1);
 
-                        if gb.mem.timerCounter == 0 {
-                            gb.mem.timerCounter = gb.mem.timerModulo;
-                            gb.mem.requestedInterrupts |= 1 << 2;
-                            cyclesPerTimerIncrement -= gb.mem.timerMode as u32; 
+                            if gb.mem.timerCounter == 0 {
+                                gb.mem.timerCounter = gb.mem.timerModulo;
+                                gb.mem.requestedInterrupts |= 1 << 2;
+                                cyclesPerTimerIncrement -= gb.mem.timerMode as u32; 
+                            }
                         }
                     }
-                }
-            } 
+                } 
         }
         //--------------------------------------------------------------------
 
@@ -368,7 +369,7 @@ fn main() {
         //------------------------------------------------------------------------
 
         //--------------------draw debug screen-----------------------------------
-        
+
         if prg.shouldDisplayDebug {
             drawDebugInfo(&dbg, gb,  &mut renderer);
         }

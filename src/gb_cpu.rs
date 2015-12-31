@@ -82,15 +82,13 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
     }
 
     let instructionToExecute = readByteFromMemory(mem, cpu.PC);
-
-    if instructionToExecute == 0xC5 && !mem.inBios {
-        println!("PC: {:X} SP: {:X} BC: {:X}", cpu.PC, cpu.SP, word(cpu.B, cpu.C));
-    }
-
+    
     let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
-    if instructionToExecute == 0xF1 && !mem.inBios {
-        println!("PC: {:X} SP: {:X} AF: {:X}", cpu.PC, cpu.SP, word(cpu.A, cpu.F));
-    }
+
+    //make sure cpu.F always has the low bits cleared.
+    //TODO: figure out a clean way of implementing this on only instructions that modify F
+    cpu.F &= 0xF0;
+
     cpu.PC = newPC;
 
     //Handling interrupts takes 20 cycles to just set up handling
@@ -948,23 +946,25 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
 
         0x27 => { //DAA
 
-            let mut result = cpu.A as u16;
+            let mut result = cpu.A;
 
             if !isFlagSet!(Neg) { //if addition was used
+
+                if isFlagSet!(Carry) || result > 0x99 {
+                    result = result.wrapping_add(0x60);
+                    setFlag!(Carry);
+                }
                 
                 if isFlagSet!(Half) || result & 0xF > 0x9 {
                     result = result.wrapping_add(0x6);
                 }
 
-                if isFlagSet!(Carry) || result & 0xF0 > 0x90 {
-                    result = result.wrapping_add(0x60);
-                }
 
             }
             else { //subtraction used
 
                 if isFlagSet!(Half) {
-                    result = result.wrapping_sub(6) & 0xFF;
+                    result = result.wrapping_sub(6);
                 }
 
                 if isFlagSet!(Carry) {
@@ -973,20 +973,16 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
 
             }
 
-            if result & 100 > 0 {
-                setFlag!(Carry);
-            }
-
             clearFlag!(Half);
 
-            if result & 0xFF == 0 {
+            if result == 0 {
                 setFlag!(Zero);
             }
             else {
                 clearFlag!(Zero);
             }
 
-            cpu.A = result as u8;
+            cpu.A = result;
 
             (cpu.PC.wrapping_add(1), 4)
 

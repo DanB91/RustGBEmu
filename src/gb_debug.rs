@@ -91,8 +91,8 @@ pub fn drawDebugInfo(dbg: &DebugInfo, gb: &GameBoyState, renderer: &mut Renderer
 
 }
 
-pub fn dumpGameBoyState(gb: &GameBoyState) -> Result<()> {
-   let mut f = try!(File::create("dump.txt"));
+pub fn dumpGameBoyState(gb: &GameBoyState, fileName: &str) -> Result<()> {
+   let mut f = try!(File::create(fileName));
    let mut toPrint = format!("{}\n{}\n{}\n{}\n{}\n{}\n", 
                       format!("Currently in BIOS: {}", gb.mem.inBios),
                       format!("Flags: Z: {}, N: {}, H: {}, C: {}", isFlagSet(Flag::Zero, gb.cpu.F), isFlagSet(Flag::Neg, gb.cpu.F), isFlagSet(Flag::Half, gb.cpu.F), isFlagSet(Flag::Carry, gb.cpu.F)),
@@ -102,13 +102,31 @@ pub fn dumpGameBoyState(gb: &GameBoyState) -> Result<()> {
                       format!("SCX: {}, SCY: {}", gb.mem.lcd.scx, gb.mem.lcd.scy));
 
 
-   toPrint = format!("{}\n\n{}", toPrint, lcdDebugInfo(&gb.mem.lcd));
+   toPrint = format!("{}\n\nMemory Info\n{}\n\nLCD Info\n{}", toPrint, memDebugInfo(&gb.mem), lcdDebugInfo(&gb.mem.lcd));
 
 
 
    try!(f.write_all(&toPrint.into_bytes()[..]));
 
    Ok(())
+}
+
+fn memDebugInfo(mem: &MemoryMapState) -> String {
+    let mut toPrint = String::new();
+    let mut byteRow: Vec<String> = vec![];
+
+    for (i, row) in mem.workingRAM.chunks(8).enumerate() {
+        for byte in row {
+            byteRow.push(format!("{:2X}", byte));
+        }
+
+        let rowStr = byteRow.join(",");
+        toPrint = format!("{}{:X}\t{}\n", toPrint, (i * 8) + 0xC000, rowStr);
+        byteRow.clear();
+
+    }
+
+    toPrint
 }
 
 fn lcdDebugInfo(lcd: &LCDState) -> String {
