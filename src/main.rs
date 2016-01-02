@@ -121,6 +121,14 @@ fn main() {
 
     gb.mem.romData = romData;
 
+    //skip "Nintendo" logo if specified
+    if prg.shouldSkipBootScreen {
+        gb.cpu.PC = 0x100;
+        gb.mem.inBios = false;
+        gb.mem.lcd.mode = LCDMode::VBlank;
+    }
+
+
     let mut cyclesPerDividerIncrement = 0u32;
     let mut cyclesPerTimerIncrement = 0u32;
 
@@ -303,8 +311,7 @@ fn main() {
         //------------------------step emulator-------------------------------
         if !prg.isPaused {
             //run several thousand game boy cycles or so 
-            while batchCycles < CYCLES_PER_SLEEP || 
-                (prg.shouldSkipBootScreen && gb.mem.inBios) {
+            while batchCycles < CYCLES_PER_SLEEP {
 
                     stepCPU(&mut gb.cpu, &mut gb.mem);
 

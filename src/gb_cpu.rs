@@ -22,7 +22,8 @@ pub struct CPUState {
     pub totalCycles: u64, //total cycles since game has been loaded
     pub instructionCycles: u32, //number of cycles in a given instruction
 
-    pub enableInterrupts: bool
+    pub enableInterrupts: bool,
+    pub isHalted: bool
 }
 
 impl CPUState {
@@ -41,7 +42,8 @@ impl CPUState {
             totalCycles: 0,
             instructionCycles: 0,
 
-            enableInterrupts: false
+            enableInterrupts: false,
+            isHalted: false
         }
     }
 }
@@ -65,6 +67,7 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
 
         if interruptsToHandle != 0 {
             isHandlingInterrupt = true;
+            cpu.isHalted = false; //no longer halted when servicing interrupt
 
             pushOnToStack(mem, cpu.PC, &mut cpu.SP); //Save PC
 
@@ -81,19 +84,21 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
         }
     }
 
-    let instructionToExecute = readByteFromMemory(mem, cpu.PC);
-    
-    let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
+    if !cpu.isHalted {
+        let instructionToExecute = readByteFromMemory(mem, cpu.PC);
 
-    //make sure cpu.F always has the low bits cleared.
-    //TODO: figure out a clean way of implementing this on only instructions that modify F
-    cpu.F &= 0xF0;
+        let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
 
-    cpu.PC = newPC;
+        //make sure cpu.F always has the low bits cleared.
+        //TODO: figure out a clean way of implementing this on only instructions that modify F
+        cpu.F &= 0xF0;
 
-    //Handling interrupts takes 20 cycles to just set up handling
-    cpu.instructionCycles = if isHandlingInterrupt {cyclesTaken.wrapping_add(20)} else {cyclesTaken};
-    cpu.totalCycles = cpu.totalCycles.wrapping_add(cyclesTaken as u64);
+        cpu.PC = newPC;
+
+        //Handling interrupts takes 20 cycles to just set up handling
+        cpu.instructionCycles = if isHandlingInterrupt {cyclesTaken.wrapping_add(20)} else {cyclesTaken};
+        cpu.totalCycles = cpu.totalCycles.wrapping_add(cyclesTaken as u64);
+    }
 
 }
 
@@ -1214,8 +1219,15 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
         },
 
         0x76 => { //HALT
+            if cpu.enableInterrupts {
+                   cpu.isHalted = true;
+                   (cpu.PC.wrapping_add(1), 4)
+            }
+            else {
+                //does the next instruction without incrementing the PC
+                executeInstruction(readByteFromMemory(mem, cpu.PC.wrapping_add(1)), cpu, mem)
+            }
             //TODO(DanB): to be implemented....
-            (cpu.PC.wrapping_add(1), 4)
 
         },
 
@@ -1538,7 +1550,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
             (cpu.PC.wrapping_add(2), 12)
         }
         0xF1 => pop16!(A,F), //POP AF
-        0xF2 => { //LDH A, (a8)
+        0xF2 => { //LDH A, (C)
             //I can use "+" here since readByteFromMemory can't return a value high enough to wrap
             let addr = cpu.C as u16 + 0xFF00; 
             cpu.A = readByteFromMemory(mem, addr);

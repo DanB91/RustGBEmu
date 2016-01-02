@@ -112,9 +112,10 @@ pub fn dumpGameBoyState(gb: &GameBoyState, fileName: &str) -> Result<()> {
 }
 
 fn memDebugInfo(mem: &MemoryMapState) -> String {
-    let mut toPrint = String::new();
+    let mut toPrint = "Working Ram\n".to_string();
     let mut byteRow: Vec<String> = vec![];
 
+    //Working RAM
     for (i, row) in mem.workingRAM.chunks(8).enumerate() {
         for byte in row {
             byteRow.push(format!("{:2X}", byte));
@@ -122,6 +123,19 @@ fn memDebugInfo(mem: &MemoryMapState) -> String {
 
         let rowStr = byteRow.join(",");
         toPrint = format!("{}{:X}\t{}\n", toPrint, (i * 8) + 0xC000, rowStr);
+        byteRow.clear();
+
+    }
+
+    toPrint = toPrint + "\nROM:\n";
+
+    //ROM 
+    for i in 0..0x1000 {
+        for byte in 0..8 {
+            byteRow.push(format!("{:2X}", readByteFromMemory(mem, byte * (i + 1))));
+        }
+        let rowStr = byteRow.join(",");
+        toPrint = format!("{}{:X}\t{}\n", toPrint, (i * 8), rowStr);
         byteRow.clear();
 
     }
