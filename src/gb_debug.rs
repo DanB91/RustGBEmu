@@ -188,7 +188,7 @@ fn lcdDebugInfo(lcd: &LCDState) -> String {
 
    let mut oamStr = String::new() + "OAM Section:";
    for (byteNum, byte) in lcd.oam.iter().enumerate() {
-       if byteNum % 16 == 0 {
+       if byteNum % 4 == 0 {
            oamStr = oamStr + "\n";
        }
        oamStr = format!("{}{:X},", oamStr, byte)

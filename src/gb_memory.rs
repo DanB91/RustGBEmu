@@ -8,6 +8,7 @@ use gb_joypad::*;
 use gb_cpu::CLOCK_SPEED_HZ;
 
 pub const CYCLES_PER_DIVIDER_INCREMENT: u32 = 256;
+pub const CYCLES_PER_DMA_BYTE: u32 = 4;
 
 
 //tells how fast to increment the timer
@@ -39,6 +40,10 @@ pub struct MemoryMapState {
     pub timerMode: TimerMode, 
     pub isTimerEnabled: bool, 
 
+    pub isDMAOccurring: bool,
+    pub currentDMAAddress: u16,
+    pub currentDMACycles: u32
+
 }
 
 impl MemoryMapState {
@@ -60,7 +65,11 @@ impl MemoryMapState {
             timerCounter: 0,
             timerModulo: 0,
             timerMode: TimerMode::Mode0, 
-            isTimerEnabled: false
+            isTimerEnabled: false,
+
+            isDMAOccurring: false,
+            currentDMAAddress: 0,
+            currentDMACycles: 0
         }
     }
 
@@ -256,6 +265,7 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0xFF43 => lcd.scx,
         0xFF44 => lcd.currScanLine,
         0xFF45 => lcd.lyc,
+        0xFF46 => (memory.currentDMAAddress >> 8) as u8,
         0xFF47 => u8ForColorPalette(&lcd.palette),
         0xFF48 => u8ForColorPalette(&lcd.spritePalette0),
         0xFF49 => u8ForColorPalette(&lcd.spritePalette1),
@@ -320,9 +330,9 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
             lcd.isEnabled = if (byte & 0x80) != 0 {true} else {false};
             
             //Bit 4 - Background Tile Set Select
-            lcd.backgroundTileSet = (byte >> 4) & 1;
+            lcd.backgroundTileSet = if testBit!(byte, 4) {1} else {0};
             //Bit 3 - Background Tile Map Select
-            lcd.backgroundTileMap = (byte >> 3) & 1;
+            lcd.backgroundTileMap = if testBit!(byte, 3) {1} else {0};
             //Bit 2 - Sprite size
             lcd.spriteHeight = if testBit!(byte, 2) {SpriteHeight::Tall} 
                 else {SpriteHeight::Short};
@@ -341,6 +351,18 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
         0xFF43 => lcd.scx = byte,
         0xFF44 => lcd.currScanLine = 0, //resets the current line if written to
         0xFF45 => lcd.lyc = byte,
+        
+        0xFF46 => {
+            memory.currentDMAAddress = if byte <= 0xF1 {
+                0x100 * byte as u16
+            }
+            else {
+                0xF100
+            };
+
+            memory.isDMAOccurring = true;
+        },
+
         0xFF47 => updateColorPaletteFromU8(&mut lcd.palette, byte),
         0xFF48 => updateColorPaletteFromU8(&mut lcd.spritePalette0, byte),
         0xFF49 => updateColorPaletteFromU8(&mut lcd.spritePalette1, byte),

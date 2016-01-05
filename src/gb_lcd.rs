@@ -242,7 +242,7 @@ fn getBackgroundTileAddressFromReferenceAddress(backgroundTileReferenceAddress: 
 
 fn colorNumberForBackgroundTileReferenceAddress(backgroundTileRefAddr: usize, scanLinePos: usize, lcd: &mut LCDState) -> ColorNumber {
 
-    let xMask = 0x80u8 >> ((scanLinePos + lcd.scx as usize) & 7);
+    let xMask = 0x80u8 >> ((scanLinePos as usize) & 7);
     let backgroundTileAddr = getBackgroundTileAddressFromReferenceAddress(backgroundTileRefAddr, lcd);
 
     let highBit = if (lcd.videoRAM[backgroundTileAddr + 1] & xMask) != 0 {1u8} else {0};
@@ -255,12 +255,12 @@ fn colorNumberForBackgroundTileReferenceAddress(backgroundTileRefAddr: usize, sc
 //TODO: refactor
 fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDState) -> ColorNumber {
 
-    let currPixelYPostion = lcd.scy.wrapping_add(lcd.currScanLine) as usize;
+    let currPixelYPostion = lcd.currScanLine as usize;
     let spriteYStart = sprite.y.wrapping_sub(16) as usize;
 
 
     let spriteXStart = sprite.x.wrapping_sub(8) as usize;
-    let currPixelXPostion = posInScanLine.wrapping_add(lcd.scx as usize);
+    let currPixelXPostion = posInScanLine;
 
     debug_assert!(currPixelXPostion >= spriteXStart);
     debug_assert!(currPixelYPostion >= spriteYStart);
@@ -389,7 +389,6 @@ pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLa
             ScanVRAMAndOAM if lcd.modeClock >= 172 => {
                 //TODO: Draw VRAM to internal screen buffer
 
-                let yInPixels = lcd.scy.wrapping_add(lcd.currScanLine);
 
                 let mut backgroundTileRefAddr = getBackgroundTileReferenceStartAddress(lcd);
                 let backgroundTileRefRowStart = backgroundTileRefAddr - (lcd.scx as usize / TILE_WIDTH); 
@@ -410,8 +409,8 @@ pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLa
 
                         //x coordinates explicitly ignored since even though sprites outside of the
                         //screen are not drawn, they do affect priority
-                        if yInPixels < spriteY &&
-                            yInPixels >= spriteY.wrapping_sub(16) {
+                        if lcd.currScanLine < spriteY &&
+                            lcd.currScanLine >= spriteY.wrapping_sub(16) {
 
                                 spritesSortedByPriority.push(
                                     Sprite::new(spriteY, spriteX, lcd.oam[i+2], lcd.oam[i+3], i)

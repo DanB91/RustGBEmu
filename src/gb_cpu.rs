@@ -89,6 +89,7 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
 
         let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
 
+
         //make sure cpu.F always has the low bits cleared.
         //TODO: figure out a clean way of implementing this on only instructions that modify F
         cpu.F &= 0xF0;
@@ -98,6 +99,29 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
         //Handling interrupts takes 20 cycles to just set up handling
         cpu.instructionCycles = if isHandlingInterrupt {cyclesTaken.wrapping_add(20)} else {cyclesTaken};
         cpu.totalCycles = cpu.totalCycles.wrapping_add(cyclesTaken as u64);
+        
+        if mem.isDMAOccurring {
+            mem.currentDMACycles += cpu.instructionCycles;
+
+            if mem.currentDMACycles > CYCLES_PER_DMA_BYTE {
+
+                //not finished transferring
+                if (mem.currentDMAAddress & 0xFF) < 0xA0 {
+                    let byteToWrite =  readByteFromMemory(mem, mem.currentDMAAddress);
+                    let destAddr = 0xFE00 + (mem.currentDMAAddress & 0xFF);
+                    //println!("Transferring: {:X} from address {:X}, to address: {:X}", byteToWrite, mem.currentDMAAddress, destAddr); 
+                    writeByteToMemory(mem, byteToWrite, destAddr);
+                    mem.currentDMACycles -= CYCLES_PER_DMA_BYTE;
+                    mem.currentDMAAddress = mem.currentDMAAddress.wrapping_add(1); 
+                }
+                //finished transferring
+                else {
+                    mem.isDMAOccurring = false;
+                    mem.currentDMACycles = 0;
+                    mem.currentDMAAddress = 0;
+                }
+            }
+        }
     }
 
 }
