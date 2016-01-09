@@ -256,12 +256,7 @@ fn colorNumberForBackgroundTileReferenceAddress(backgroundTileRefAddr: usize, sc
 fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDState) -> ColorNumber {
 
     let currPixelYPostion = lcd.currScanLine as usize;
-    let spriteYStart = if !sprite.isYFlipped {
-        sprite.y.wrapping_sub(16) as usize;
-    }
-    else {
-        sprite.y as usize
-    };
+    let spriteYStart = sprite.y.wrapping_sub(16) as usize;
 
 
     let spriteXStart = sprite.x.wrapping_sub(8) as usize;
@@ -272,7 +267,29 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
 
     let currPixelYPostionInTile = currPixelYPostion - spriteYStart; 
 
-    let xMask = 0x80u8 >> (currPixelXPostion - spriteXStart & 7);
+
+    let xOffset = if sprite.isXFlipped {
+        7 - (currPixelXPostion - spriteXStart)
+    }
+    else {
+        currPixelXPostion - spriteXStart
+    };
+
+
+    let yOffset = if sprite.isYFlipped {
+        match lcd.spriteHeight {
+            //the 8 is because we only look at the first tile anyway when it is flipped
+            Short if currPixelYPostion - spriteYStart < 8 => 7 - (currPixelYPostion - spriteYStart),
+            Short => (currPixelYPostion - spriteYStart),
+            Tall => 15 - (currPixelYPostion - spriteYStart),
+        }
+
+    }
+    else {
+        currPixelYPostion - spriteYStart
+    };
+
+    let xMask = 0x80u8 >> xOffset;
 
     match lcd.spriteHeight {
         Short => {
@@ -280,9 +297,8 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
                 //sprites start at start of vram
                 let mut tileAddr = sprite.tileReference as usize * BYTES_PER_TILE; 
 
-                //since we already found the correct tile, we only need the last 3 bits of the 
-                //y-scroll register to determine where in the tile we start
-                tileAddr += (((currPixelYPostion - spriteYStart) & 7) as usize) * BYTES_PER_TILE_ROW;
+
+                tileAddr += (yOffset as usize) * BYTES_PER_TILE_ROW;
 
                 let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
                 let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
@@ -295,12 +311,17 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
         }
 
         Tall => {
-            let tileRef = if currPixelYPostionInTile < 8 {sprite.tileReference & 0xFE} else {sprite.tileReference | 1};
+            let tileRef = if (currPixelYPostionInTile < 8 && !sprite.isYFlipped) ||
+                (currPixelYPostionInTile >= 8 && sprite.isYFlipped) {
+                sprite.tileReference & 0xFE
+            } else {
+                sprite.tileReference | 1
+            };
 
             //sprites start at start of vram
             let mut tileAddr = tileRef as usize * BYTES_PER_TILE; 
 
-            tileAddr += (((currPixelYPostion - spriteYStart) & 7) as usize) * BYTES_PER_TILE_ROW;
+            tileAddr += (yOffset as usize) * BYTES_PER_TILE_ROW;
 
             let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};
             let lowBit = if (lcd.videoRAM[tileAddr] & xMask) != 0 {1u8} else {0};
