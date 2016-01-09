@@ -1,4 +1,5 @@
 [package]
+build = "build.rs"
 
 name = "gbEmu"
 version = "0.0.1"
@@ -12,3 +13,6 @@ sdl2-sys = "*"
 sdl2 = "*"
 libc = "*"
 errno = "*"
+
+[build-dependencies]
+gcc="*"

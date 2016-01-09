@@ -69,6 +69,8 @@ impl ProgramState {
     }
 }
 
+
+
 fn printUsageAndExit() -> ! {
     println!("{}", USAGE);
     std::process::exit(1)

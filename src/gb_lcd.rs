@@ -256,7 +256,12 @@ fn colorNumberForBackgroundTileReferenceAddress(backgroundTileRefAddr: usize, sc
 fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDState) -> ColorNumber {
 
     let currPixelYPostion = lcd.currScanLine as usize;
-    let spriteYStart = sprite.y.wrapping_sub(16) as usize;
+    let spriteYStart = if !sprite.isYFlipped {
+        sprite.y.wrapping_sub(16) as usize;
+    }
+    else {
+        sprite.y as usize
+    };
 
 
     let spriteXStart = sprite.x.wrapping_sub(8) as usize;

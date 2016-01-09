@@ -14,8 +14,25 @@ use gb_lcd::*;
 use std::fs::File;
 use std::io::Result;
 use std::io::Write;
+use std::io::Read;
+use libc::{c_void, c_int, c_float};
+use std::ptr;
+
 
 static FONT_PATH_STR: &'static str = "res/Gamegirl.ttf";
+
+
+extern "C" {
+    fn stbtt_InitFont(fontInfo: *mut stbtt_fontinfo, data: *mut c_void, offset: c_int) -> c_int; 
+    //used as offset argument in InitFont 
+    fn stbtt_GetFontOffsetForIndex(data: *mut c_void, index: c_int) -> c_int;
+    fn stbtt_ScaleForPixelHeight(fontInfo: *mut stbtt_fontinfo, offset: c_int) -> c_int;
+
+
+    fn stbtt_GetCodepointBitmap(fontInfo: *mut stbtt_fontinfo, scaleX: c_float, scaleY: c_float,
+                                codePoint: c_int, width: *mut c_int, height: *mut c_int,
+                                xOffset: *mut c_int, yOffset: *mut c_int) -> *mut c_void;
+}
 
 
 pub struct DebugInfo {
@@ -35,8 +52,62 @@ pub struct DebugInfo {
 
 }
 
+#[repr(C)]
+struct stbtt_fontinfo
+{
+   userdata: *mut c_void,
+   data: *mut c_void,              // pointer to .ttf file
+   fontstart: c_int,         // offset of start of font
+
+   numGlyphs: c_int,                    // number of glyphs, needed for range checking
+
+   loca: c_int,// table locations as offset from start of .ttf
+   head: c_int,// table locations as offset from start of .ttf
+   glyf: c_int,// table locations as offset from start of .ttf
+   hhea: c_int,// table locations as offset from start of .ttf
+   hmtx: c_int,// table locations as offset from start of .ttf
+   kern: c_int, // table locations as offset from start of .ttf
+   
+   index_map: c_int,                     // a cmap mapping for our chosen character encoding
+   indexToLocFormat: c_int             // format needed to map from glyph index to glyph
+}
+
+
+fn initFont() -> Result<()> {
+    let mut f = try!(File::open(FONT_PATH_STR));
+
+    let mut buffer = vec![];
+    // read the whole file
+    try!(f.read_to_end(&mut buffer));
+
+    unsafe {
+        let rawData = buffer.as_mut_ptr() as *mut c_void ;
+        let mut fontInfo = stbtt_fontinfo {
+            userdata: ptr::null_mut(),
+            data: ptr::null_mut(),
+            fontstart: 0,
+            numGlyphs: 0,
+            loca: 0,
+            head: 0,
+            glyf: 0,
+            hhea: 0,
+            hmtx: 0,
+            kern: 0,
+
+            index_map: 0,
+            indexToLocFormat: 0
+        }; 
+
+        stbtt_InitFont(&mut fontInfo, rawData, stbtt_GetFontOffsetForIndex(rawData, 0)); 
+    }
+
+    Ok(())
+}
+
 //TODO: figure out font proportions
 pub fn initDebug(xpos: i32, ypos: i32, debugWidth: u32, debugHeight: u32) -> DebugInfo {
+    //TODO: get C linking to work
+    //initFont();
     sdl2_ttf::init().unwrap();
     let font =  Font::from_file(Path::new(FONT_PATH_STR), debugHeight as i32/16).unwrap();
 
