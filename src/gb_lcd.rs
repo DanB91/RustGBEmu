@@ -297,7 +297,6 @@ fn colorNumberForSprite(sprite: &Sprite, posInScanLine: usize, lcd: &mut LCDStat
                 //sprites start at start of vram
                 let mut tileAddr = sprite.tileReference as usize * BYTES_PER_TILE; 
 
-
                 tileAddr += (yOffset as usize) * BYTES_PER_TILE_ROW;
 
                 let highBit = if (lcd.videoRAM[tileAddr + 1] & xMask) != 0 {1u8} else {0};

@@ -13,18 +13,35 @@ pub const CYCLES_PER_DMA_BYTE: u32 = 4;
 
 //tells how fast to increment the timer
 #[derive(Copy, Clone)]
+#[repr(u32)]
 pub enum TimerMode  {
-    Mode0 =  CLOCK_SPEED_HZ as isize / 4096,
-    Mode1 =  CLOCK_SPEED_HZ as isize / 262144,
-    Mode2 =  CLOCK_SPEED_HZ as isize / 65536,
-    Mode3 =  CLOCK_SPEED_HZ as isize / 16384
+    Mode0 =  CLOCK_SPEED_HZ as u32 / 4096,
+    Mode1 =  CLOCK_SPEED_HZ as u32 / 262144,
+    Mode2 =  CLOCK_SPEED_HZ as u32 / 65536,
+    Mode3 =  CLOCK_SPEED_HZ as u32 / 16384
+}
+
+#[derive(PartialEq)]
+#[repr(u8)]
+pub enum MemoryBankControllerType {
+    MBC0 = 0,
+    MBC1 = 1,
+}
+
+impl MemoryBankControllerType {
+    pub fn fromU8(num: u8) -> MemoryBankControllerType {
+        match num {
+            0 => MemoryBankControllerType::MBC0,
+            1 => MemoryBankControllerType::MBC1,
+            _ => panic!("Unsupported MBC type {}", num)
+        }
+    }
 }
 
 //NOTE(DanB):anything accessed by MMU goes in here including LCD related function
 pub struct MemoryMapState {
     pub workingRAM: [u8;0x2000],
     pub zeroPageRAM: [u8;0x7F],
-    pub romData: Vec<u8>,
     pub inBios: bool,
 
     pub requestedInterrupts: u8,
@@ -42,8 +59,17 @@ pub struct MemoryMapState {
 
     pub isDMAOccurring: bool,
     pub currentDMAAddress: u16,
-    pub currentDMACycles: u32
+    pub currentDMACycles: u32,
 
+
+    //Cart data
+    pub romData: Vec<u8>,
+    pub mbcType: MemoryBankControllerType,
+    pub cartRAM: Vec<u8>,
+    //TODO: use array slices instead of bank numbers
+    pub currentMBCBank: u8,
+    pub currentRAMBank: u8,
+    pub isCartRAMEnabled: bool
 }
 
 impl MemoryMapState {
@@ -52,7 +78,6 @@ impl MemoryMapState {
         MemoryMapState {
             workingRAM: [0;0x2000],
             zeroPageRAM: [0;0x7F],
-            romData: vec![],
             inBios: true,
 
             requestedInterrupts: 0,
@@ -69,7 +94,14 @@ impl MemoryMapState {
 
             isDMAOccurring: false,
             currentDMAAddress: 0,
-            currentDMACycles: 0
+            currentDMACycles: 0,
+
+            romData: vec![],
+            mbcType: MemoryBankControllerType::MBC0,
+            cartRAM: vec![],
+            currentMBCBank: 0,
+            currentRAMBank: 0,
+            isCartRAMEnabled: false
         }
     }
 
@@ -157,7 +189,6 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0...0xFF if !memory.inBios => memory.romData[i], 
         0x100...0x3FFF => memory.romData[i],
         0x4000...0x7FFF => memory.romData[i], //TODO: Implement bank swapping
-       
         0x8000...0x9FFF => {
             //vram can only be properly accessed when not being drawn from
             if lcd.mode != ScanVRAMAndOAM {
@@ -167,7 +198,22 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
                 0xFF
             }
         }
+        0xA000...0xBFFF => {
 
+            if memory.isCartRAMEnabled {
+                match memory.mbcType {
+                    MemoryBankControllerType::MBC0 => memory.cartRAM[i - 0xA000],
+                    MemoryBankControllerType::MBC1 => {
+                       let addrMultiplier = memory.currentRAMBank as usize + 1;
+                       memory.cartRAM[(i - 0xA000) * addrMultiplier]
+                    },
+                }
+            }
+            else {
+                0
+            }
+
+        }
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000],
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000], //echo of internal RAM 
         0xFE00...0xFE9F => {
@@ -287,6 +333,19 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
     match addr {
         //vram can only be properly accessed when not being drawn from
         0x8000...0x9FFF if lcd.mode != ScanVRAMAndOAM => lcd.videoRAM[i - 0x8000] = byte,
+        0xA000...0xBFFF => {
+
+            if memory.isCartRAMEnabled {
+                match memory.mbcType {
+                    MemoryBankControllerType::MBC0 => memory.cartRAM[i - 0xA000] = byte ,
+                    MemoryBankControllerType::MBC1 => {
+                       let addrMultiplier = memory.currentRAMBank as usize + 1;
+                       memory.cartRAM[(i - 0xA000) * addrMultiplier] = byte
+                    },
+                }
+            }
+
+        }
         0xC000...0xDFFF => memory.workingRAM[i - 0xC000] = byte,
         0xE000...0xFDFF => memory.workingRAM[i - 0xE000] = byte,
         //TODO: Shouldn't be able to write to OAM memory during these modes.
@@ -375,14 +434,15 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
 }
 
 pub fn readWordFromMemory(memory: &MemoryMapState, addr: u16) -> u16 {
-    debug_assert!(addr + 1 > addr); //check for overflow
+    debug_assert!(addr.wrapping_add(1) > addr); //check for overflow
 
     ((readByteFromMemory(memory, addr+1) as u16) << 8)  | 
         readByteFromMemory(memory, addr) as u16  
 }
 
 pub fn writeWordToMemory(memory: &mut MemoryMapState, word: u16, addr: u16 ) {
-    debug_assert!(addr + 1 > addr); //check for overflow
+    debug_assert!(addr.wrapping_add(1) > addr, 
+                  "Word {:X} being inserted at address {:X}", word, addr); //check for overflow
 
     writeByteToMemory(memory, lb(word), addr);
     writeByteToMemory(memory, hb(word), addr+1);

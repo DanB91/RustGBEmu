@@ -11,6 +11,7 @@ extern crate gbEmu;
 
 
 use std::env;
+use std::str;
 
 use libc::usleep;
 use libc::EINTR;
@@ -23,6 +24,7 @@ use gbEmu::gb_cpu::*;
 use gbEmu::gb_lcd::*;
 use gbEmu::gb_joypad::*;
 use gbEmu::gb_debug::*;
+use gbEmu::gb_memory::MemoryBankControllerType::*;
 
 use sdl2::event::*;
 use sdl2::keyboard::Keycode;
@@ -121,8 +123,32 @@ fn main() {
     };
 
 
+    //load ROM data
     gb.mem.romData = romData;
+    gb.mem.mbcType = MemoryBankControllerType::fromU8(gb.mem.romData[0x147]);
+    gb.mem.cartRAM = match gb.mem.mbcType {
+       MBC0 => vec![0;0x2000],
+       MBC1 => vec![0;0x8000]
+    };
 
+
+
+    let mut titleBytes = [0u8;14]; 
+
+    //TODO use clone_from_slice in rust 1.6
+    for (i, byteRef) in gb.mem.romData[0x134..0x142].iter().enumerate() {
+        titleBytes[i] = *byteRef;
+    }
+
+    let utfResult = str::from_utf8(&titleBytes[..]);
+
+    let gameName = match utfResult {
+        Ok(string) => string,
+        Err(_) => "GB Emu"
+    };
+
+    
+    
     //skip "Nintendo" logo if specified
     if prg.shouldSkipBootScreen {
         gb.cpu.PC = 0x100;
@@ -143,7 +169,7 @@ fn main() {
 
     let mut mainWindowHeight = WINDOW_HEIGHT;
     let mainWindowWidth = WINDOW_WIDTH;
-    let mainWindow = videoSubsystem.window("GB Emu", mainWindowWidth, mainWindowHeight).position_centered().build().unwrap();
+    let mainWindow = videoSubsystem.window(gameName, mainWindowWidth, mainWindowHeight).position_centered().build().unwrap();
     let mainWindowID = mainWindow.id();
     let mut renderer = mainWindow.renderer().build().unwrap();
 
