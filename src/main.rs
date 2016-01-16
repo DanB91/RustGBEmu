@@ -125,7 +125,12 @@ fn main() {
 
     //load ROM data
     gb.mem.romData = romData;
-    gb.mem.mbcType = MemoryBankControllerType::fromU8(gb.mem.romData[0x147]);
+    gb.mem.mbcType = match gb.mem.romData[0x147]  {
+        0 => MBC0,
+        1 => MBC1,
+        _ => panic!("MBC not yet supported: {}", gb.mem.romData[0x147])
+    };
+
     gb.mem.cartRAM = match gb.mem.mbcType {
        MBC0 => vec![0;0x2000],
        MBC1 => vec![0;0x8000]

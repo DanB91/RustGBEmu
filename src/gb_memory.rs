@@ -28,15 +28,12 @@ pub enum MemoryBankControllerType {
     MBC1 = 1,
 }
 
-impl MemoryBankControllerType {
-    pub fn fromU8(num: u8) -> MemoryBankControllerType {
-        match num {
-            0 => MemoryBankControllerType::MBC0,
-            1 => MemoryBankControllerType::MBC1,
-            _ => panic!("Unsupported MBC type {}", num)
-        }
-    }
+#[repr(u8)]
+pub enum BankingMode {
+    Mode0 = 0, //8kbyte ram; 2MB rom
+    Mode1 = 1  //32kbyte ram; 512kb ROM
 }
+
 
 //NOTE(DanB):anything accessed by MMU goes in here including LCD related function
 pub struct MemoryMapState {
@@ -66,10 +63,11 @@ pub struct MemoryMapState {
     pub romData: Vec<u8>,
     pub mbcType: MemoryBankControllerType,
     pub cartRAM: Vec<u8>,
-    //TODO: use array slices instead of bank numbers
+
     pub currentMBCBank: u8,
     pub currentRAMBank: u8,
-    pub isCartRAMEnabled: bool
+    pub isCartRAMEnabled: bool,
+    pub bankingMode: BankingMode
 }
 
 impl MemoryMapState {
@@ -101,7 +99,8 @@ impl MemoryMapState {
             cartRAM: vec![],
             currentMBCBank: 0,
             currentRAMBank: 0,
-            isCartRAMEnabled: false
+            isCartRAMEnabled: false,
+            bankingMode: BankingMode::Mode0
         }
     }
 
@@ -188,7 +187,16 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
         0...0xFF if memory.inBios => BIOS[i],  
         0...0xFF if !memory.inBios => memory.romData[i], 
         0x100...0x3FFF => memory.romData[i],
-        0x4000...0x7FFF => memory.romData[i], //TODO: Implement bank swapping
+        0x4000...0x7FFF =>{
+            match memory.mbcType {
+                MemoryBankControllerType::MBC0 => memory.romData[i],
+                MemoryBankControllerType::MBC1 => {
+                    let addrMultiplier = memory.currentMBCBank as usize + 1;
+                    memory.cartRAM[i * addrMultiplier]
+
+                }
+            }
+        }
         0x8000...0x9FFF => {
             //vram can only be properly accessed when not being drawn from
             if lcd.mode != ScanVRAMAndOAM {
@@ -331,6 +339,36 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
 
     let i = addr as usize;
     match addr {
+        0...0x1FFF => {
+            if byte == 0xA {
+                memory.isCartRAMEnabled = true;
+            }
+            else {
+                memory.isCartRAMEnabled = false;
+            }
+        }
+        0x2000...0x3FFF => {
+            match memory.bankingMode {
+                BankingMode::Mode0 => {}
+                BankingMode::Mode1 => memory.currentRAMBank |= byte & 0x1F,
+            }
+            match memory.currentMBCBank {
+                0|0x20|0x40|0x60 => memory.currentMBCBank += 1,
+                _ => {}
+                
+            }
+        }
+        0x4000...0x5FFF => {
+            match memory.bankingMode {
+                BankingMode::Mode0 => memory.currentMBCBank |= byte << 5,
+                BankingMode::Mode1 => memory.currentRAMBank |= byte << 5,
+            }
+            match memory.currentMBCBank {
+                0|0x20|0x40|0x60 => memory.currentMBCBank += 1,
+                _ => {}
+                
+            }
+        }
         //vram can only be properly accessed when not being drawn from
         0x8000...0x9FFF if lcd.mode != ScanVRAMAndOAM => lcd.videoRAM[i - 0x8000] = byte,
         0xA000...0xBFFF => {
