@@ -52,6 +52,31 @@ pub struct DebugInfo {
 
 }
 
+
+//circular buffer
+static mut previousExecutionStates: [(u8, CPUState); 100] = [(0,                                                  
+        CPUState {
+            PC: 0,
+            SP: 0,
+            A: 0,
+            B: 0,
+            C: 0,
+            D: 0,
+            E: 0,
+            F: 0,
+            H: 0,
+            L: 0,
+            totalCycles: 0,
+            instructionCycles: 0,
+
+            enableInterrupts: false,
+            isHalted: false
+        }                                                     
+        );100];
+
+static mut nextFreeExecStateSlot: usize = 0; 
+
+
 #[repr(C)]
 struct stbtt_fontinfo
 {
@@ -73,8 +98,73 @@ struct stbtt_fontinfo
 }
 
 
+macro_rules! gbDebugAssert {
+    ($cond: expr, $($arg: tt)*) => ({
+        if cfg!(debug_assertions) && !$cond {
+
+            unsafe {
+                printPreviousExecutionStates();
+            }
+
+            debug_assert!($cond, $($arg)*);
+        }
+
+    })
+}
+
+macro_rules! gbDebugPanic {
+    ($($arg: tt)*) => ({
+        if cfg!(debug_assertions) {
+
+            unsafe {
+                printPreviousExecutionStates();
+            }
+
+        }
+        panic!($($arg)*)
+
+    })
+}
+
+pub unsafe fn printPreviousExecutionStates() {
+    let fileName = "dump.txt";
+    let mut f = match File::create(fileName) {
+        Ok(f) => f,
+        Err(err) => {
+            println!("Could not dump execution trace.  Reason: {}", err);
+            return;
+        }
+    };
+
+
+
+    let bufLen = previousExecutionStates.len();
+    let mut i = (nextFreeExecStateSlot + 1) % bufLen;
+
+    while i != nextFreeExecStateSlot {
+        let (instruction, executionState) = previousExecutionStates[i];
+        let _ = write!(f, "Instruction {:X} was executed on state: {:?}\n", instruction, executionState);
+        i = (i + 1) % bufLen;
+    }
+
+    println!("Execution trace dumped to {}", fileName);
+
+}
+
+pub fn gbDebugInsertExecutionState(instruction: u8, resultingExecutionState: &CPUState) {
+    if cfg!(debug_assertions) {
+        unsafe {
+            previousExecutionStates[nextFreeExecStateSlot] = (instruction, *resultingExecutionState);
+            nextFreeExecStateSlot = (nextFreeExecStateSlot + 1) % previousExecutionStates.len();
+        }
+    }
+
+}
+
+
 fn initFont() -> Result<()> {
     let mut f = try!(File::open(FONT_PATH_STR));
+    gbDebugAssert!(true, "");
 
     let mut buffer = vec![];
     // read the whole file
@@ -107,7 +197,7 @@ fn initFont() -> Result<()> {
 //TODO: figure out font proportions
 pub fn initDebug(xpos: i32, ypos: i32, debugWidth: u32, debugHeight: u32) -> DebugInfo {
     //TODO: get C linking to work
-    //initFont();
+    initFont();
     sdl2_ttf::init().unwrap();
     let font =  Font::from_file(Path::new(FONT_PATH_STR), debugHeight as i32/16).unwrap();
 

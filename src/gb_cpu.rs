@@ -2,12 +2,16 @@
  * All Z80 related functions go into this module
  *
  */
+use std::fmt;
 
 use gb_memory::*;
 use gb_util::*;
+use gb_debug::*;
 
 pub const CLOCK_SPEED_HZ: f32 = 4194304f32;
 
+
+#[derive(Copy,Clone)]
 pub struct CPUState {
     pub PC: u16,
     pub SP: u16,
@@ -46,6 +50,17 @@ impl CPUState {
             isHalted: false
         }
     }
+}
+
+impl fmt::Debug for CPUState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut toPrint = format!("CPUState:\nPC:{:X}  SP:{:X}\n", self.PC, self.SP);
+        toPrint = format!("{}A:{:X}  B:{:X}  C:{:X}  D:{:X}\n", toPrint, self.A, self.B, self.C, self.D);
+        toPrint = format!("{}E:{:X}  F:{:X}  H:{:X}  L:{:X}\n", toPrint, self.E, self.F, self.H, self.L);
+
+        write!(f, "{}", toPrint)
+    }
+
 }
 
 #[derive(Copy, Clone)]
@@ -87,7 +102,10 @@ pub fn stepCPU(cpu: &mut CPUState, mem: &mut MemoryMapState) {
     if !cpu.isHalted {
         let instructionToExecute = readByteFromMemory(mem, cpu.PC);
 
+        gbDebugInsertExecutionState(instructionToExecute, cpu);
+
         let (newPC, cyclesTaken) = executeInstruction(instructionToExecute, cpu, mem); 
+
 
 
         //make sure cpu.F always has the low bits cleared.
@@ -868,7 +886,8 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
 
         0x10 => { //STOP 0
             //TODO: To be implemented
-            debug_assert!(readByteFromMemory(&mem, cpu.PC.wrapping_add(1)) == 0); //next byte should be 0
+            gbDebugAssert!(readByteFromMemory(&mem, cpu.PC.wrapping_add(1)) == 0, 
+                           "STOP must be called with 0"); //next byte should be 0
             (cpu.PC.wrapping_add(2), 4)
         },
 
@@ -1612,7 +1631,7 @@ pub fn executeInstruction(instruction: u8, cpu: &mut CPUState, mem: &mut MemoryM
         //No FD
         //FE implemented above
         0xFF => restart!(0x38), //RST 38H
-        _ => panic!("Illegal instruction {:X}. PC: {:X} ", instruction, cpu.PC)
+        _ => gbDebugPanic!("Illegal instruction {:X}", instruction)
 
     }
 }

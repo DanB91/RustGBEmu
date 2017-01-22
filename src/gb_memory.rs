@@ -2,6 +2,7 @@ use std::fs;
 use std::io;
 use std::io::Read;
 
+use gb_debug::*;
 use gb_util::*;
 use gb_lcd::*;
 use gb_joypad::*;
@@ -97,7 +98,7 @@ impl MemoryMapState {
             romData: vec![],
             mbcType: MemoryBankControllerType::MBC0,
             cartRAM: vec![],
-            currentMBCBank: 0,
+            currentMBCBank: 1,
             currentRAMBank: 0,
             isCartRAMEnabled: false,
             bankingMode: BankingMode::Mode0
@@ -191,9 +192,11 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
             match memory.mbcType {
                 MemoryBankControllerType::MBC0 => memory.romData[i],
                 MemoryBankControllerType::MBC1 => {
-                    let addrMultiplier = memory.currentMBCBank as usize + 1;
-                    memory.cartRAM[i * addrMultiplier]
-
+                    let addrMultiplier = memory.currentMBCBank as usize - 1;
+                    if i + (0x4000* addrMultiplier) >= memory.romData.len() {
+                        println!("Bad MBC: {:X}", memory.currentMBCBank);
+                    }
+                    memory.romData[i + (0x4000 * addrMultiplier)]
                 }
             }
         }
@@ -212,8 +215,8 @@ pub fn readByteFromMemory(memory: &MemoryMapState, addr: u16) -> u8 {
                 match memory.mbcType {
                     MemoryBankControllerType::MBC0 => memory.cartRAM[i - 0xA000],
                     MemoryBankControllerType::MBC1 => {
-                       let addrMultiplier = memory.currentRAMBank as usize + 1;
-                       memory.cartRAM[(i - 0xA000) * addrMultiplier]
+                        let addrMultiplier = memory.currentRAMBank as usize;
+                        memory.cartRAM[(i - 0xA000) + (0x2000 * addrMultiplier)]
                     },
                 }
             }
@@ -348,10 +351,10 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
             }
         }
         0x2000...0x3FFF => {
-            match memory.bankingMode {
-                BankingMode::Mode0 => {}
-                BankingMode::Mode1 => memory.currentRAMBank |= byte & 0x1F,
-            }
+            //only set low 5 bits
+            memory.currentMBCBank &= 0x60;
+            memory.currentMBCBank |= byte & 0x1F;
+
             match memory.currentMBCBank {
                 0|0x20|0x40|0x60 => memory.currentMBCBank += 1,
                 _ => {}
@@ -359,9 +362,15 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
             }
         }
         0x4000...0x5FFF => {
+            println!("Setting upper bits to  {:X}", byte);
+            gbDebugPanic!("goddamn");
             match memory.bankingMode {
-                BankingMode::Mode0 => memory.currentMBCBank |= byte << 5,
-                BankingMode::Mode1 => memory.currentRAMBank |= byte << 5,
+                BankingMode::Mode0 => {
+                    //only set upper 2 bits
+                    memory.currentMBCBank &= 0x1F;
+                    memory.currentMBCBank |= (byte & 0x3) << 5;
+                },
+                BankingMode::Mode1 => memory.currentRAMBank = byte & 0x3,
             }
             match memory.currentMBCBank {
                 0|0x20|0x40|0x60 => memory.currentMBCBank += 1,
@@ -369,16 +378,24 @@ pub fn writeByteToMemory(memory: &mut MemoryMapState, byte: u8, addr: u16) {
                 
             }
         }
+        0x6000...0x7FFF => {
+            println!("changing mode to: {:X}. MBC: {:X}", byte, memory.currentMBCBank);
+            memory.bankingMode = match byte & 0x1 {
+                0 => BankingMode::Mode0,
+                1 => BankingMode::Mode1,
+                _ => panic!("Impossible")
+            };
+        }
         //vram can only be properly accessed when not being drawn from
         0x8000...0x9FFF if lcd.mode != ScanVRAMAndOAM => lcd.videoRAM[i - 0x8000] = byte,
         0xA000...0xBFFF => {
 
             if memory.isCartRAMEnabled {
                 match memory.mbcType {
-                    MemoryBankControllerType::MBC0 => memory.cartRAM[i - 0xA000] = byte ,
+                    MemoryBankControllerType::MBC0 => memory.cartRAM[i - 0xA000] = byte,
                     MemoryBankControllerType::MBC1 => {
-                       let addrMultiplier = memory.currentRAMBank as usize + 1;
-                       memory.cartRAM[(i - 0xA000) * addrMultiplier] = byte
+                        let addrMultiplier = memory.currentRAMBank as usize;
+                        memory.cartRAM[(i - 0xA000) + (addrMultiplier * 0x2000)] = byte;
                     },
                 }
             }

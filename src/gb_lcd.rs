@@ -383,7 +383,7 @@ pub fn stepLCD(lcd: &mut LCDState, requestedInterrupts: &mut u8, cyclesTakenOfLa
                 changeScanLine(lcd.currScanLine + 1, lcd, requestedInterrupts);
 
                 //at the last line...
-                if lcd.currScanLine == 143 {
+                if lcd.currScanLine == 144 {
                     changeToNewLCDMode(VBlank, lcd, requestedInterrupts); //engage VBlank
                     swap(&mut lcd.screen, &mut lcd.screenBackBuffer); //commit fully drawn screen
                     *requestedInterrupts |= 1; //request VBlank interrupt
